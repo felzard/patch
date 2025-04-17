@@ -100,10 +100,10 @@ jobs:
           fi
 
           echo "🔧 Found libil2cpp.so at $LIB_PATH, patching..."
-          curl -L -o ProjectSekai.exe https://github.com/felzard/patch/releases/download/1/ProjectSekai.exe
+          curl -L -o JProjectSekai.exe https://github.com/felzard/patch/releases/download/1/JProjectSekai.exe
           cd "$(dirname "$LIB_PATH")"
-          wine "$OLDPWD/ProjectSekai.exe" libil2cpp.so
-          rm libil2cpp.so "$OLDPWD/ProjectSekai.exe"
+          wine "$OLDPWD/JProjectSekai.exe" libil2cpp.so
+          rm libil2cpp.so "$OLDPWD/JProjectSekai.exe"
           mv libil2cpp_patched.so libil2cpp.so
 
       - name: Rebuild unsigned APK
