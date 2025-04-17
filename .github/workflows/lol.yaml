@@ -1,4 +1,4 @@
-name: Download, Patch & Recompile APK
+name: Download, Patch & Recompile APK (glb)
 
 on:
   push:
