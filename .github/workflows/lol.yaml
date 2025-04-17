@@ -82,6 +82,11 @@ jobs:
           name: Merged-APK
           path: downloads/merged.apk
 
+      - name: List files in decompiled directory
+        run: |
+          echo "📂 Listing all files in decompiled directory:"
+          find decompiled/ -type f | sort
+
       - name: Patch libil2cpp.so (if exists)
         run: |
           set -e
@@ -139,4 +144,3 @@ jobs:
           path: |
             patched-unsigned.apk
             patched-signed.apk
-
