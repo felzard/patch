@@ -128,8 +128,12 @@ jobs:
       - name: Align signed APK
         run: |
           sudo apt-get install -y zipalign || true
-          ZIPALIGN=$(find /usr -name zipalign | head -n 1)
-          $ZIPALIGN -v -p 4 patched-unsigned.apk patched-signed.apk
+          ZIPALIGN=$(command -v zipalign || find /usr -type f -name zipalign | head -n 1)
+          if [ -z "$ZIPALIGN" ]; then
+          echo "❌ zipalign not found"
+          exit 1
+          fi
+          "$ZIPALIGN" -v -p 4 patched-unsigned.apk patched-signed.apk
 
       - name: Upload Final APKs
         uses: actions/upload-artifact@v4
@@ -138,3 +142,15 @@ jobs:
           path: |
             patched-unsigned.apk
             patched-signed.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: "Patched APK Release"
+          tag_name: "release-${{ github.run_number }}"
+          files: |
+            patched-unsigned.apk
+            patched-signed.apk
+            downloads/merged.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
