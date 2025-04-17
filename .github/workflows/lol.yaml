@@ -135,9 +135,13 @@ jobs:
 
       - name: Align signed APK
         run: |
-          sudo apt-get install -y zipalign || true
-          ZIPALIGN=$(find /usr -name zipalign | head -n 1)
-          $ZIPALIGN -v -p 4 patched-unsigned.apk patched-signed.apk
+          sudo apt-get install -y zipalign
+          if ! command -v zipalign &> /dev/null; then
+            echo "❌ zipalign not found in PATH"
+            exit 1
+          fi
+          zipalign -v -p 4 patched-unsigned.apk patched-signed.apk
+
 
       - name: Upload Final APKs
         uses: actions/upload-artifact@v4
