@@ -4,11 +4,12 @@ on:
   push:
     branches:
       - main        # or replace with your default branch
-  workflow_dispatch:  # still allow manual runs
+  workflow_dispatch:  # manual trigger
 
 jobs:
   patch-and-build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,7 +20,7 @@ jobs:
           sudo apt-get install -y cargo
           cargo install apkeep
 
-      - name: Download APK
+      - name: Download APK/XAPK from APKPure
         run: |
           mkdir -p downloads
           apkeep -a com.sega.ColorfulStage.en -d apk-pure downloads
@@ -31,26 +32,68 @@ jobs:
           chmod +x apktool
           sudo mv apktool apktool.jar /usr/local/bin/
 
-      - name: Decompile APK
-        run: |
-          apktool d downloads/com.sega.ColorfulStage.en.apk -o decompiled
-
       - name: Install Wine
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y wine wine32 wine64 winbind
 
+      - name: Process and Decompile APK/XAPK
+        run: |
+          set -e
+
+          FILE=$(ls downloads/*.{apk,xapk} 2>/dev/null | head -n1)
+          if [ -z "$FILE" ]; then
+            echo "❌ No .apk or .xapk found"; exit 1
+          fi
+
+          WORKDIR=$(pwd)
+
+          if [[ "$FILE" == *.xapk ]]; then
+            echo "📦 Detected XAPK, extracting..."
+            TMPDIR=$(mktemp -d)
+            unzip -q "$FILE" -d "$TMPDIR"
+
+            BASEAPK=$(find "$TMPDIR" -name "*base.apk" | head -n1)
+            CONFIGAPK=$(find "$TMPDIR" -name "*config.arm64_v8a.apk" | head -n1)
+
+            if [ -z "$BASEAPK" ] || [ -z "$CONFIGAPK" ]; then
+              echo "❌ Missing split APKs inside .xapk"; exit 1
+            fi
+
+            echo "🧩 Merging split APKs..."
+            mkdir merge_apk
+            cp "$BASEAPK" merge_apk/base.apk
+            cp "$CONFIGAPK" merge_apk/config.apk
+            cd merge_apk
+            zip -u merged.apk base.apk config.apk
+            cd "$WORKDIR"
+            mv merge_apk/merged.apk downloads/merged.apk
+
+            APK="downloads/merged.apk"
+          else
+            APK="$FILE"
+          fi
+
+          echo "📥 Using APK: $APK"
+          apktool d "$APK" -o decompiled
+
+      - name: Upload merged APK (if from XAPK)
+        if: success() && hashFiles('downloads/merged.apk') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Merged-APK
+          path: downloads/merged.apk
+
       - name: Patch libil2cpp.so
         working-directory: decompiled/lib/arm64-v8a
         run: |
-          curl -L -o ProjectSekai.exe \
-            https://github.com/felzard/patch/releases/download/1/ProjectSekai.exe
+          curl -L -o ProjectSekai.exe https://github.com/felzard/patch/releases/download/1/ProjectSekai.exe
           wine ProjectSekai.exe libil2cpp.so
           rm libil2cpp.so ProjectSekai.exe
           mv libil2cpp_patched.so libil2cpp.so
 
-      - name: Recompile APK (unsigned)
+      - name: Rebuild unsigned APK
         run: |
           apktool b decompiled -o patched-unsigned.apk
 
@@ -65,7 +108,7 @@ jobs:
             -keypass android \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Sign APK (v1)
+      - name: Sign APK with debug keystore
         run: |
           jarsigner \
             -verbose \
@@ -77,13 +120,12 @@ jobs:
             patched-unsigned.apk \
             androiddebugkey
 
-      - name: Align APK
+      - name: Align signed APK
         run: |
-          sudo apt-get update
-          sudo apt-get install -y zipalign
-          zipalign -v -p 4 patched-unsigned.apk patched-signed.apk
+          ZIPALIGN=$(find /usr -name zipalign | head -n 1)
+          $ZIPALIGN -v -p 4 patched-unsigned.apk patched-signed.apk
 
-      - name: Upload APK artifacts
+      - name: Upload Final APKs
         uses: actions/upload-artifact@v4
         with:
           name: ProjectSekai-Patched-APK
