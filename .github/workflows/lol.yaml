@@ -54,28 +54,21 @@ jobs:
             TMPDIR=$(mktemp -d)
             unzip -q "$FILE" -d "$TMPDIR"
 
-            BASEAPK=$(find "$TMPDIR" -name "*base.apk" | head -n1)
-            CONFIGAPK=$(find "$TMPDIR" -name "*config.arm64_v8a.apk" | head -n1)
+            echo "📥 Merging all APKs from XAPK..."
+            MERGED="$WORKDIR/downloads/merged.apk"
+            touch "$MERGED"
 
-            if [ -z "$BASEAPK" ] || [ -z "$CONFIGAPK" ]; then
-              echo "❌ Missing split APKs inside .xapk"; exit 1
-            fi
+            for SPLITAPK in $(find "$TMPDIR" -type f -name "*.apk"); do
+              echo "➕ Adding $SPLITAPK to $MERGED"
+              zip -q -u "$MERGED" "$SPLITAPK"
+            done
 
-            echo "🧩 Merging split APKs..."
-            mkdir merge_apk
-            cp "$BASEAPK" merge_apk/base.apk
-            cp "$CONFIGAPK" merge_apk/config.apk
-            cd merge_apk
-            zip -u merged.apk base.apk config.apk
-            cd "$WORKDIR"
-            mv merge_apk/merged.apk downloads/merged.apk
-
-            APK="downloads/merged.apk"
+            APK="$MERGED"
           else
             APK="$FILE"
           fi
 
-          echo "📥 Using APK: $APK"
+          echo "🔧 Decompiling $APK → decompiled/"
           apktool d "$APK" -o decompiled
 
       - name: Upload merged APK (if from XAPK)
