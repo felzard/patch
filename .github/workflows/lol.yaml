@@ -3,8 +3,8 @@ name: Download, Patch & Recompile APK
 on:
   push:
     branches:
-      - main        # or replace with your default branch
-  workflow_dispatch:  # manual trigger
+      - main
+  workflow_dispatch:
 
 jobs:
   patch-and-build:
@@ -55,18 +55,13 @@ jobs:
             unzip -q "$FILE" -d "$TMPDIR"
 
             echo "📥 Merging all APKs from XAPK..."
-            MERGED="$WORKDIR/downloads/merged.apk"
-
-            # Find all APKs inside the XAPK
             APK_LIST=($(find "$TMPDIR" -type f -name "*.apk"))
             if [ ${#APK_LIST[@]} -eq 0 ]; then
               echo "❌ No APKs found inside XAPK"; exit 1
             fi
 
-            # Copy the first APK to start the merged archive
+            MERGED="$WORKDIR/downloads/merged.apk"
             cp "${APK_LIST[0]}" "$MERGED"
-
-            # Append the remaining APKs to the archive
             for ((i=1; i<${#APK_LIST[@]}; i++)); do
               echo "➕ Adding ${APK_LIST[i]} to $MERGED"
               zip -q -u "$MERGED" "${APK_LIST[i]}"
@@ -87,12 +82,20 @@ jobs:
           name: Merged-APK
           path: downloads/merged.apk
 
-      - name: Patch libil2cpp.so
-        working-directory: decompiled/lib/arm64-v8a
+      - name: Patch libil2cpp.so (if exists)
         run: |
+          set -e
+          LIB_PATH="decompiled/lib/arm64-v8a/libil2cpp.so"
+          if [ ! -f "$LIB_PATH" ]; then
+            echo "❌ libil2cpp.so not found at $LIB_PATH. Skipping patch."
+            exit 0
+          fi
+
+          echo "🔧 Found libil2cpp.so, patching..."
           curl -L -o ProjectSekai.exe https://github.com/felzard/patch/releases/download/1/ProjectSekai.exe
-          wine ProjectSekai.exe libil2cpp.so
-          rm libil2cpp.so ProjectSekai.exe
+          cd "$(dirname "$LIB_PATH")"
+          wine "$OLDPWD/ProjectSekai.exe" libil2cpp.so
+          rm libil2cpp.so "$OLDPWD/ProjectSekai.exe"
           mv libil2cpp_patched.so libil2cpp.so
 
       - name: Rebuild unsigned APK
@@ -124,6 +127,7 @@ jobs:
 
       - name: Align signed APK
         run: |
+          sudo apt-get install -y zipalign || true
           ZIPALIGN=$(find /usr -name zipalign | head -n 1)
           $ZIPALIGN -v -p 4 patched-unsigned.apk patched-signed.apk
 
