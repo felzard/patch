@@ -56,11 +56,20 @@ jobs:
 
             echo "📥 Merging all APKs from XAPK..."
             MERGED="$WORKDIR/downloads/merged.apk"
-            touch "$MERGED"
 
-            for SPLITAPK in $(find "$TMPDIR" -type f -name "*.apk"); do
-              echo "➕ Adding $SPLITAPK to $MERGED"
-              zip -q -u "$MERGED" "$SPLITAPK"
+            # Find all APKs inside the XAPK
+            APK_LIST=($(find "$TMPDIR" -type f -name "*.apk"))
+            if [ ${#APK_LIST[@]} -eq 0 ]; then
+              echo "❌ No APKs found inside XAPK"; exit 1
+            fi
+
+            # Copy the first APK to start the merged archive
+            cp "${APK_LIST[0]}" "$MERGED"
+
+            # Append the remaining APKs to the archive
+            for ((i=1; i<${#APK_LIST[@]}; i++)); do
+              echo "➕ Adding ${APK_LIST[i]} to $MERGED"
+              zip -q -u "$MERGED" "${APK_LIST[i]}"
             done
 
             APK="$MERGED"
