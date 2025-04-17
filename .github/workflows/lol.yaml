@@ -1,16 +1,18 @@
 name: Download, Patch & Recompile APK
+
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main        # or replace with your default branch
+  workflow_dispatch:  # still allow manual runs
 
 jobs:
   patch-and-build:
     runs-on: ubuntu-latest
     steps:
-      # 1. Checkout the repo
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Install apkeep to grab the APK
       - name: Install apkeep
         run: |
           sudo apt-get update
@@ -20,9 +22,8 @@ jobs:
       - name: Download APK
         run: |
           mkdir -p downloads
-          apkeep -a com.sega.ColorfulStage.en -d apk-pure --output downloads
+          apkeep -a com.sega.ColorfulStage.en -d apk-pure downloads
 
-      # 3. Install apktool
       - name: Install apktool
         run: |
           wget https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool -O apktool
@@ -30,36 +31,29 @@ jobs:
           chmod +x apktool
           sudo mv apktool apktool.jar /usr/local/bin/
 
-      # 4. Decompile APK
       - name: Decompile APK
         run: |
           apktool d downloads/com.sega.ColorfulStage.en.apk -o decompiled
 
-      # 5. Install Wine (to run the Windows patcher) :contentReference[oaicite:0]{index=0}
       - name: Install Wine
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y wine wine32 wine64 winbind
 
-      # 6. Download & run the patcher on libil2cpp.so 
       - name: Patch libil2cpp.so
         working-directory: decompiled/lib/arm64-v8a
         run: |
           curl -L -o ProjectSekai.exe \
             https://github.com/felzard/patch/releases/download/1/ProjectSekai.exe
-          # run the patcher to produce libil2cpp_patched.so
           wine ProjectSekai.exe libil2cpp.so
-          # replace the original with the patched one
           rm libil2cpp.so ProjectSekai.exe
           mv libil2cpp_patched.so libil2cpp.so
 
-      # 7. Rebuild the APK (unsigned)
       - name: Recompile APK (unsigned)
         run: |
           apktool b decompiled -o patched-unsigned.apk
 
-      # 8. Generate a debug keystore for signing
       - name: Generate debug keystore
         run: |
           keytool -genkey -v \
@@ -71,8 +65,7 @@ jobs:
             -keypass android \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      # 9. Sign the APK with jarsigner
-      - name: Sign APK (v1 signature)
+      - name: Sign APK (v1)
         run: |
           jarsigner \
             -verbose \
@@ -84,14 +77,12 @@ jobs:
             patched-unsigned.apk \
             androiddebugkey
 
-      # 10. (Optional) Align the signed APK
       - name: Align APK
         run: |
           sudo apt-get update
           sudo apt-get install -y zipalign
           zipalign -v -p 4 patched-unsigned.apk patched-signed.apk
 
-      # 11. Upload both unsigned & signed APKs
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
