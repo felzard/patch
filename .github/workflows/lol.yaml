@@ -93,7 +93,7 @@ jobs:
 
       # 11. Upload both unsigned & signed APKs
       - name: Upload APK artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ProjectSekai-Patched-APK
           path: |
