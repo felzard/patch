@@ -41,39 +41,41 @@ jobs:
       - name: Process and Decompile APK/XAPK
         run: |
           set -e
-
+      
           FILE=$(ls downloads/*.{apk,xapk} 2>/dev/null | head -n1)
           if [ -z "$FILE" ]; then
             echo "❌ No .apk or .xapk found"; exit 1
           fi
-
+      
           WORKDIR=$(pwd)
-
+      
           if [[ "$FILE" == *.xapk ]]; then
             echo "📦 Detected XAPK, extracting..."
             TMPDIR=$(mktemp -d)
             unzip -q "$FILE" -d "$TMPDIR"
-
-            echo "📥 Merging all APKs from XAPK..."
+      
+            echo "📥 Extracting and processing APKs inside XAPK..."
             APK_LIST=($(find "$TMPDIR" -type f -name "*.apk"))
             if [ ${#APK_LIST[@]} -eq 0 ]; then
               echo "❌ No APKs found inside XAPK"; exit 1
             fi
-
-            MERGED="$WORKDIR/downloads/merged.apk"
-            cp "${APK_LIST[0]}" "$MERGED"
+      
+            echo "🔧 Decompiling base APK (${APK_LIST[0]}) → decompiled/"
+            apktool d "${APK_LIST[0]}" -o decompiled
+      
+            echo "🔗 Merging split APK contents into base decompiled folder..."
             for ((i=1; i<${#APK_LIST[@]}; i++)); do
-              echo "➕ Adding ${APK_LIST[i]} to $MERGED"
-              zip -q -u "$MERGED" "${APK_LIST[i]}"
+              echo "➕ Merging: ${APK_LIST[i]}"
+              unzip -o "${APK_LIST[i]}" -d tmp_extract
+              cp -r tmp_extract/lib/* decompiled/lib/ 2>/dev/null || true
+              cp -r tmp_extract/assets/* decompiled/assets/ 2>/dev/null || true
+              cp -r tmp_extract/res/* decompiled/res/ 2>/dev/null || true
+              rm -rf tmp_extract
             done
-
-            APK="$MERGED"
           else
-            APK="$FILE"
+            echo "🔧 Decompiling single APK → decompiled/"
+            apktool d "$FILE" -o decompiled
           fi
-
-          echo "🔧 Decompiling $APK → decompiled/"
-          apktool d "$APK" -o decompiled
 
       - name: Upload merged APK (if from XAPK)
         if: success() && hashFiles('downloads/merged.apk') != ''
