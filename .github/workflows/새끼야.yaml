@@ -1,0 +1,169 @@
+name: Download, Patch & Recompile APK (glb)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  patch-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cargo openjdk-17-jdk zipalign apksigner
+          cargo install apkeep
+
+      - name: Download APK/XAPK from APKPure
+        run: |
+          mkdir -p downloads
+          apkeep -a com.sega.ColorfulStage.en -d apk-pure downloads
+
+      - name: Install apktool
+        run: |
+          wget https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool -O apktool
+          wget https://bitbucket.org/iBotPeaches/apktool/downloads/apktool_2.9.0.jar -O apktool.jar
+          chmod +x apktool
+          sudo mv apktool apktool.jar /usr/local/bin/
+
+      - name: Install Wine
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y wine wine32 wine64 winbind
+
+      - name: Process and Decompile APK/XAPK
+        run: |
+          set -e
+          FILE=$(ls downloads/*.{apk,xapk} 2>/dev/null | head -n1)
+          if [ -z "$FILE" ]; then echo "❌ No .apk or .xapk found"; exit 1; fi
+          WORKDIR=$(pwd)
+
+          if [[ "$FILE" == *.xapk ]]; then
+            echo "📦 Detected XAPK, extracting..."
+            TMPDIR=$(mktemp -d)
+            unzip -q "$FILE" -d "$TMPDIR"
+            APK_LIST=($(find "$TMPDIR" -type f -name "*.apk"))
+            if [ ${#APK_LIST[@]} -eq 0 ]; then echo "❌ No APKs found inside XAPK"; exit 1; fi
+
+            echo "📥 Merging APKs using bundletool..."
+            mkdir -p bundle
+            cp "${APK_LIST[@]}" bundle/
+
+            # Create zip file for split APKs
+            (cd bundle && zip -r ../base.apks .)
+
+            # Download bundletool
+            curl -L -o bundletool.jar https://github.com/google/bundletool/releases/download/1.15.6/bundletool-all-1.15.6.jar
+          else
+            echo "🔧 Detected single APK. Skipping bundle merging..."
+            cp "$FILE" base.apk
+          fi
+
+      - name: Decompile APK
+        run: |
+          if [ -f base.apk ]; then
+            apktool d base.apk -o decompiled
+          else
+            unzip -q base.apks -d tmp_apks
+            BASE_APK=$(find tmp_apks -name "*.apk" | head -n1)
+            apktool d "$BASE_APK" -o decompiled
+          fi
+
+      - name: Patch libil2cpp.so (if exists)
+        run: |
+          set -e
+          LIB_PATH=$(find decompiled/ -type f -path "*/libil2cpp.so" | head -n1)
+          if [ -z "$LIB_PATH" ]; then echo "❌ libil2cpp.so not found"; exit 1; fi
+
+          echo "🔧 Found libil2cpp.so at $LIB_PATH, patching..."
+          curl -L -o ProjectSekai.exe https://github.com/felzard/patch/releases/download/1/ProjectSekai.exe
+          cd "$(dirname "$LIB_PATH")"
+          wine "$OLDPWD/ProjectSekai.exe" libil2cpp.so
+          rm libil2cpp.so "$OLDPWD/ProjectSekai.exe"
+          mv libil2cpp_patched.so libil2cpp.so
+
+      - name: Rebuild unsigned APK
+        run: |
+          apktool b decompiled -o patched-unsigned.apk
+
+      - name: Generate debug keystore
+        run: |
+          keytool -genkey -v \
+            -keystore debug.keystore \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Sign APK with apksigner
+        run: |
+          apksigner sign \
+            --ks debug.keystore \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out patched-signed.apk \
+            patched-unsigned.apk
+
+      - name: Align signed APK
+        run: |
+          zipalign -v -p 4 patched-signed.apk aligned-signed.apk
+          mv aligned-signed.apk patched-signed.apk
+
+      - name: Upload Unsigned APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProjectSekai-Patched-Unsigned
+          path: patched-unsigned.apk
+
+      - name: Upload Signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProjectSekai-Patched-Signed
+          path: patched-signed.apk
+
+  emulator-test:
+    runs-on: ubuntu-latest
+    needs: patch-and-build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Signed APK from Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ProjectSekai-Patched-Signed
+          path: emulator_apk
+
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Run Android Emulator and Install APK
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3
+          script: |
+            echo "✅ Emulator ready, installing APK..."
+            adb install emulator_apk/patched-signed.apk
+
+            echo "📱 Verifying install..."
+            adb shell pm list packages | grep com.sega.ColorfulStage.en || {
+              echo "❌ APK not installed"; exit 1;
+            }
+
+            echo "🎉 Successfully installed on emulator!"
