@@ -79,8 +79,12 @@ jobs:
       - name: Patch libil2cpp.so (if exists)
         run: |
           set -e
+
           LIB_PATH=$(find decompiled/ -type f -path "*/libil2cpp.so" | head -n1)
-          if [ -z "$LIB_PATH" ]; then echo "❌ libil2cpp.so not found"; exit 1; fi
+          if [ -z "$LIB_PATH" ]; then
+            echo "❌ libil2cpp.so not found in decompiled directory"
+            exit 1
+          fi
 
           echo "🔧 Found libil2cpp.so at $LIB_PATH, patching..."
           curl -L -o ProjectSekai.exe https://github.com/felzard/patch/releases/download/1/ProjectSekai.exe
