@@ -38,18 +38,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wine wine32 wine64 winbind
 
-      - name: Install Android SDK Build Tools (including apksigner)
+      - name: Install Android SDK and Build Tools (including apksigner)
         run: |
           echo "Installing Android SDK..."
-          sudo apt-get install -y wget unzip
+          sudo apt-get install -y wget unzip openjdk-8-jdk
           mkdir -p $HOME/android-sdk
           export ANDROID_SDK_ROOT=$HOME/android-sdk
+          
+          # Download and extract SDK Command-line Tools
           wget https://dl.google.com/android/repository/commandlinetools-linux-7583922_latest.zip -O commandlinetools.zip
           unzip commandlinetools.zip -d $ANDROID_SDK_ROOT
           rm commandlinetools.zip
+
+          # Install necessary SDK packages
           export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
           yes | sdkmanager --licenses
-          sdkmanager "platform-tools" "build-tools;30.0.3" # Install the build tools to get apksigner
+          sdkmanager "platform-tools" "build-tools;30.0.3" "platforms;android-30"
 
       - name: Process and Decompile APK/XAPK
         run: |
