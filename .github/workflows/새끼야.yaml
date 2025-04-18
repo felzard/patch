@@ -142,26 +142,41 @@ jobs:
           name: ProjectSekai-Signed-APK
           path: patched-signed.apk
 
-      - name: Run Android Emulator and Install APK
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          target: google_apis
-          arch: x86_64
-          profile: pixel_3
-          force-avd-creation: true
-          disable-animations: true
-          emulator-options: "-no-snapshot-save -noaudio -no-boot-anim -accel auto"
-          script: |
-            echo "✅ Emulator ready, installing APK..."
-            adb wait-for-device
-            adb devices
-            adb install -r patched-signed.apk
+      - name: Set up Android Emulator (ARM)
+        run: |
+          echo "Installing ARM emulator dependencies..."
+          sdkmanager --install "system-images;android-30;google_apis;armeabi-v7a"
+          echo "no" | avdmanager create avd -n test -k "system-images;android-30;google_apis;armeabi-v7a" --device "pixel"
+          echo "hw.keyboard=yes" >> ~/.android/avd/test.avd/config.ini
+          echo "hw.gpu.enabled=no" >> ~/.android/avd/test.avd/config.ini
+          echo "hw.gpu.mode=off" >> ~/.android/avd/test.avd/config.ini
+          echo "hw.ramSize=2048" >> ~/.android/avd/test.avd/config.ini
       
-            echo "📱 Verifying install..."
-            adb shell pm list packages | grep com.sega.ColorfulStage.en || {
-              echo "❌ APK not installed"; exit 1;
-            }
+      - name: Start Emulator in Background
+        run: |
+          nohup emulator -avd test -no-audio -no-window -accel off -gpu swiftshader_indirect -verbose > emulator.log 2>&1 &
       
-            echo "🎉 Successfully installed on emulator!"
+      - name: Wait for Emulator to Boot
+        run: |
+          adb wait-for-device
+          boot_completed=""
+          until [[ "$boot_completed" == "1" ]]; do
+            sleep 5
+            boot_completed=$(adb shell getprop sys.boot_completed | tr -d '\r')
+            echo "⏳ Waiting for emulator... ($boot_completed)"
+          done
+          echo "✅ Emulator is ready!"
+      
+      - name: Install APK
+        run: |
+          adb install -r emulator_apk/patched-signed.apk
+      
+      - name: Verify App Installation
+        run: |
+          adb shell pm list packages | grep com.sega.ColorfulStage.en || {
+            echo "❌ APK not installed properly"
+            exit 1
+          }
+          echo "🎉 APK installed successfully!"
+
 
