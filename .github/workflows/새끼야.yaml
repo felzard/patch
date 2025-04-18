@@ -60,6 +60,12 @@ jobs:
             apktool d "$FILE" -o decompiled
           fi
 
+      - name: Extract APK Version
+        id: version
+        run: |
+          VERSION_NAME=$(grep -oP 'versionName="\K[^"]+' decompiled/apktool.yml)
+          echo "apk_version=$VERSION_NAME" >> $GITHUB_OUTPUT
+
       - name: Patch libil2cpp.so (if exists)
         run: |
           LIB_PATH=$(find decompiled/ -type f -path "*/libil2cpp.so" | head -n1)
@@ -108,13 +114,20 @@ jobs:
           name: ProjectSekai-Signed-APK
           path: patched-signed.apk
 
-      - name: Send Discord Notification with Artifact URLs
+      - name: Notify Discord
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          TIMESTAMP=$(date)
-          ARTIFACT_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          VERSION=${{ steps.version.outputs.apk_version }}
+          RUN_ID=${{ github.run_id }}
+          REPO=${{ github.repository }}
+
+          SIGNED_URL="https://nightly.link/${REPO}/actions/runs/${RUN_ID}/ProjectSekai-Signed-APK.zip"
+          UNSIGNED_URL="https://nightly.link/${REPO}/actions/runs/${RUN_ID}/ProjectSekai-Unsigned-APK.zip"
+
           curl -H "Content-Type: application/json" \
             -X POST \
-            -d "{\"content\": \"✅ New APKs available\n🕓 Timestamp: $TIMESTAMP\n🔗 $ARTIFACT_URL\"}" \
-            "$DISCORD_WEBHOOK"
+            -d '{
+              "content": "**✅ Project Sekai APK (Global) New APKs available!**\n**Version:** '"$VERSION"'\n\n📥 **Signed APK:** '"$SIGNED_URL"'\n📥 **Unsigned APK:** '"$UNSIGNED_URL"'"
+            }' \
+            $DISCORD_WEBHOOK
