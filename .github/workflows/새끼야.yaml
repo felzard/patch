@@ -1,4 +1,4 @@
-name: Download, Patch & Recompile APK (glb)
+name: Global (CI/CD)
 
 on:
   push:
@@ -14,10 +14,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install apkeep
         run: |
           sudo apt-get update
-          sudo apt-get install -y cargo openjdk-17-jdk zipalign apksigner
+          sudo apt-get install -y cargo
           cargo install apkeep
 
       - name: Download APK/XAPK from APKPure
@@ -49,36 +49,37 @@ jobs:
             echo "📦 Detected XAPK, extracting..."
             TMPDIR=$(mktemp -d)
             unzip -q "$FILE" -d "$TMPDIR"
+
+            echo "📥 Extracting and processing APKs inside XAPK..."
             APK_LIST=($(find "$TMPDIR" -type f -name "*.apk"))
             if [ ${#APK_LIST[@]} -eq 0 ]; then echo "❌ No APKs found inside XAPK"; exit 1; fi
 
-            echo "📥 Merging APKs using bundletool..."
-            mkdir -p bundle
-            cp "${APK_LIST[@]}" bundle/
+            echo "🔧 Decompiling base APK (${APK_LIST[0]}) → decompiled/"
+            apktool d "${APK_LIST[0]}" -o decompiled
 
-            # Create zip file for split APKs
-            (cd bundle && zip -r ../base.apks .)
-
-            # Download bundletool
-            curl -L -o bundletool.jar https://github.com/google/bundletool/releases/download/1.15.6/bundletool-all-1.15.6.jar
+            echo "🔗 Merging split APK contents into base decompiled folder..."
+            for ((i=1; i<${#APK_LIST[@]}; i++)); do
+              echo "➕ Merging: ${APK_LIST[i]}"
+              unzip -o "${APK_LIST[i]}" -d tmp_extract
+              ls -R tmp_extract/lib || echo "❌ No libs in this split"
+              cp -r tmp_extract/lib/* decompiled/lib/ 2>/dev/null || true
+              cp -r tmp_extract/assets/* decompiled/assets/ 2>/dev/null || true
+              cp -r tmp_extract/res/* decompiled/res/ 2>/dev/null || true
+              rm -rf tmp_extract
+            done
           else
-            echo "🔧 Detected single APK. Skipping bundle merging..."
-            cp "$FILE" base.apk
+            echo "🔧 Decompiling single APK → decompiled/"
+            apktool d "$FILE" -o decompiled
           fi
 
-      - name: Decompile APK
-        run: |
-          if [ -f base.apk ]; then
-            apktool d base.apk -o decompiled
-          else
-            unzip -q base.apks -d tmp_apks
-            BASE_APK=$(find tmp_apks -name "*.apk" | head -n1)
-            apktool d "$BASE_APK" -o decompiled
-          fi
+      - name: Debug: List all .so files
+        run: find decompiled/ -type f -name "*.so"
 
       - name: Patch libil2cpp.so (if exists)
         run: |
           set -e
+          echo "🔍 Searching for libil2cpp.so in decompiled APK..."
+          find decompiled/ -type f -name "libil2cpp.so" || echo "No .so found."
 
           LIB_PATH=$(find decompiled/ -type f -path "*/libil2cpp.so" | head -n1)
           if [ -z "$LIB_PATH" ]; then
@@ -108,51 +109,38 @@ jobs:
             -keypass android \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Sign APK with apksigner
+      - name: Sign APK with debug keystore
         run: |
-          apksigner sign \
-            --ks debug.keystore \
-            --ks-pass pass:android \
-            --key-pass pass:android \
-            --out patched-signed.apk \
-            patched-unsigned.apk
+          jarsigner \
+            -verbose \
+            -sigalg SHA1withRSA \
+            -digestalg SHA1 \
+            -keystore debug.keystore \
+            -storepass android \
+            -keypass android \
+            patched-unsigned.apk \
+            androiddebugkey
 
       - name: Align signed APK
         run: |
-          zipalign -v -p 4 patched-signed.apk aligned-signed.apk
-          mv aligned-signed.apk patched-signed.apk
+          sudo apt-get install -y zipalign
+          if ! command -v zipalign &> /dev/null; then
+            echo "❌ zipalign not found in PATH"
+            exit 1
+          fi
+          zipalign -v -p 4 patched-unsigned.apk patched-signed.apk
 
       - name: Upload Unsigned APK
         uses: actions/upload-artifact@v4
         with:
-          name: ProjectSekai-Patched-Unsigned
+          name: ProjectSekai-Unsigned-APK
           path: patched-unsigned.apk
 
       - name: Upload Signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: ProjectSekai-Patched-Signed
+          name: ProjectSekai-Signed-APK
           path: patched-signed.apk
-
-  emulator-test:
-    runs-on: ubuntu-latest
-    needs: patch-and-build
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download Signed APK from Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ProjectSekai-Patched-Signed
-          path: emulator_apk
-
-      - name: Set up JDK
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'zulu'
-          java-version: '17'
 
       - name: Run Android Emulator and Install APK
         uses: reactivecircus/android-emulator-runner@v2
@@ -163,7 +151,7 @@ jobs:
           profile: pixel_3
           script: |
             echo "✅ Emulator ready, installing APK..."
-            adb install emulator_apk/patched-signed.apk
+            adb install patched-signed.apk
 
             echo "📱 Verifying install..."
             adb shell pm list packages | grep com.sega.ColorfulStage.en || {
