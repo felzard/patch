@@ -72,7 +72,7 @@ jobs:
             apktool d "$FILE" -o decompiled
           fi
 
-      - name: Debug: List all .so files
+      - name: List all .so files
         run: find decompiled/ -type f -name "*.so"
 
       - name: Patch libil2cpp.so (if exists)
