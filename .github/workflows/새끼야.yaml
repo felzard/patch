@@ -61,10 +61,20 @@ jobs:
           fi
 
       - name: Extract APK Version
-        id: version
         run: |
-          VERSION_NAME=$(grep -oP 'versionName="\K[^"]+' decompiled/apktool.yml)
-          echo "apk_version=$VERSION_NAME" >> $GITHUB_OUTPUT
+          if [ -f decompiled/apktool.yml ]; then
+            VERSION_NAME=$(grep -oP 'versionName="\K[^"]+' decompiled/apktool.yml)
+            if [ -n "$VERSION_NAME" ]; then
+              echo "apk_version=$VERSION_NAME" >> $GITHUB_OUTPUT
+            else
+              echo "❌ versionName not found in apktool.yml"
+              exit 1
+            fi
+          else
+            echo "❌ apktool.yml not found!"
+            exit 1
+          fi
+
 
       - name: Patch libil2cpp.so (if exists)
         run: |
