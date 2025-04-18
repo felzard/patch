@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  patch-and-build:
+  automate-shit:
     runs-on: ubuntu-latest
 
     steps:
@@ -109,44 +109,37 @@ jobs:
             -keypass android \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Align signed APK
+      - name: Align APK (before signing)
         run: |
           sudo apt-get install -y zipalign
           if ! command -v zipalign &> /dev/null; then
             echo "❌ zipalign not found in PATH"
             exit 1
           fi
-          zipalign -v -p 4 patched-unsigned.apk patched-signed.apk
+          zipalign -v -p 4 patched-unsigned.apk patched-signed-aligned.apk
 
-      - name: Sign APK with debug keystore
+      - name: Sign APK with apksigner
         run: |
-          jarsigner \
-            -verbose \
-            -sigalg SHA1withRSA \
-            -digestalg SHA1 \
-            -keystore debug.keystore \
-            -storepass android \
-            -keypass android \
-            patched-unsigned.apk \
-            androiddebugkey
+          echo "Signing APK with apksigner..."
+          apksigner sign --ks debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android --out patched-signed.apk patched-signed-aligned.apk
 
-      - name: Install jq (for JSON formatting)
+      - name: Upload Unsigned APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProjectSekai-Unsigned-APK
+          path: patched-unsigned.apk
+
+      - name: Upload Signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProjectSekai-Signed-APK
+          path: patched-signed.apk
+
+      - name: Upload APK Link to Discord
         run: |
-          sudo apt-get install -y jq
-
-      - name: Upload APKs to Discord with Metadata
-        run: |
-          VERSION=$(git rev-parse --short HEAD)
-          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-
-          JSON_PAYLOAD=$(jq -n \
-            --arg username "APK Bot" \
-            --arg content "📦 **New Project Sekai Build**\n\n🔖 **Version:** \`$VERSION\`\n🕒 **Built At:** $TIMESTAMP\n\nSigned and unsigned APKs attached below!" \
-            '{username: $username, content: $content}'
-          )
-
-          curl -F "payload_json=$JSON_PAYLOAD" \
-               -F "file1=@patched-unsigned.apk;type=application/vnd.android.package-archive" \
-               -F "file2=@patched-signed.apk;type=application/vnd.android.package-archive" \
-               ${{ secrets.DISCORD_WEBHOOK }}
-
+          echo "📤 Uploading APK link to Discord..."
+          DISCORD_WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
+          GITHUB_RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          curl -X POST -H "Content-Type: application/json" \
+            -d '{"content": "APK Build: ${GITHUB_SHA}\nVersion: v1.0.0\nTimestamp: $(date +%Y-%m-%d_%H-%M-%S)","embeds":[{"title":"APK Files","description":"The APK is ready!","url":"'"$GITHUB_RUN_URL"'","color":5814783,"fields":[{"name":"Unsigned APK","value":"[ProjectSekai-Unsigned-APK](artifact link)"}]}]}' \
+            $DISCORD_WEBHOOK_URL
