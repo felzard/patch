@@ -1,4 +1,4 @@
-name: Download, Patch & Recompile APK
+name: Download, Patch & Recompile APK (jp)
 
 on:
   push:
@@ -54,31 +54,35 @@ jobs:
             TMPDIR=$(mktemp -d)
             unzip -q "$FILE" -d "$TMPDIR"
       
-            echo "📥 Extracting and processing APKs inside XAPK..."
+            echo "📥 Extracting APKs inside XAPK..."
             APK_LIST=($(find "$TMPDIR" -type f -name "*.apk"))
             if [ ${#APK_LIST[@]} -eq 0 ]; then
               echo "❌ No APKs found inside XAPK"; exit 1
             fi
       
-            echo "🔧 Decompiling base APK (${APK_LIST[0]}) → decompiled/"
+            echo "🔧 Decompiling base APK (${APK_LIST[0]})..."
             apktool d "${APK_LIST[0]}" -o decompiled
       
-            echo "🔗 Merging split APK contents into base decompiled folder..."
+            echo "🔗 Merging split APK contents into base..."
             for ((i=1; i<${#APK_LIST[@]}; i++)); do
-              echo "➕ Merging: ${APK_LIST[i]}"
+              echo "➕ Merging ${APK_LIST[i]} → decompiled/"
               unzip -o "${APK_LIST[i]}" -d tmp_extract
               cp -r tmp_extract/lib/* decompiled/lib/ 2>/dev/null || true
               cp -r tmp_extract/assets/* decompiled/assets/ 2>/dev/null || true
               cp -r tmp_extract/res/* decompiled/res/ 2>/dev/null || true
               rm -rf tmp_extract
             done
+
+            echo "📦 Rebuilding merged APK → downloads/merged.apk"
+            apktool b decompiled -o downloads/merged.apk
+
           else
             echo "🔧 Decompiling single APK → decompiled/"
             apktool d "$FILE" -o decompiled
           fi
 
-      - name: Upload merged APK (if from XAPK)
-        if: success() && hashFiles('downloads/merged.apk') != ''
+      - name: Upload Merged APK (from XAPK)
+        if: success() && runner.os == 'Linux' && steps.process-and-decompile.outputs.FILE == '*.xapk'
         uses: actions/upload-artifact@v4
         with:
           name: Merged-APK
@@ -86,20 +90,19 @@ jobs:
 
       - name: List files in decompiled directory
         run: |
-          echo "📂 Listing all files in decompiled directory:"
+          echo "📂 Contents of decompiled/:"
           find decompiled/ -type f | sort
 
-      - name: Patch libil2cpp.so (if exists)
+      - name: Patch libil2cpp.so
         run: |
           set -e
 
           LIB_PATH=$(find decompiled/ -type f -path "*/libil2cpp.so" | head -n1)
           if [ -z "$LIB_PATH" ]; then
-            echo "❌ libil2cpp.so not found in decompiled directory"
-            exit 1
+            echo "❌ libil2cpp.so not found"; exit 1
           fi
 
-          echo "🔧 Found libil2cpp.so at $LIB_PATH, patching..."
+          echo "🔧 Patching libil2cpp.so"
           curl -L -o JProjectSekai.exe https://github.com/felzard/patch/releases/download/1/JProjectSekai.exe
           cd "$(dirname "$LIB_PATH")"
           wine "$OLDPWD/JProjectSekai.exe" libil2cpp.so
@@ -107,8 +110,7 @@ jobs:
           mv libil2cpp_patched.so libil2cpp.so
 
       - name: Rebuild unsigned APK
-        run: |
-          apktool b decompiled -o patched-unsigned.apk
+        run: apktool b decompiled -o patched-unsigned.apk
 
       - name: Generate debug keystore
         run: |
@@ -121,7 +123,7 @@ jobs:
             -keypass android \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Sign APK with debug keystore
+      - name: Sign APK (debug keystore)
         run: |
           jarsigner \
             -verbose \
@@ -136,17 +138,16 @@ jobs:
       - name: Align signed APK
         run: |
           sudo apt-get install -y zipalign
-          if ! command -v zipalign &> /dev/null; then
-            echo "❌ zipalign not found in PATH"
-            exit 1
-          fi
           zipalign -v -p 4 patched-unsigned.apk patched-signed.apk
 
-
-      - name: Upload Final APKs
+      - name: Upload Unsigned APK
         uses: actions/upload-artifact@v4
         with:
-          name: ProjectSekai-Patched-APK
-          path: |
-            patched-unsigned.apk
-            patched-signed.apk
+          name: ProjectSekai-Patched-Unsigned-APK
+          path: patched-unsigned.apk
+
+      - name: Upload Signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProjectSekai-Patched-Signed-APK
+          path: patched-signed.apk
