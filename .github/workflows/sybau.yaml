@@ -1,4 +1,4 @@
-name: Download, Patch & Recompile APK (jp)
+name: Download, Patch & Recompile APK (JP)
 
 on:
   push:
@@ -25,67 +25,68 @@ jobs:
           mkdir -p downloads
           apkeep -a com.sega.pjsekai -d apk-pure downloads
 
-      - name: Install apktool
+      - name: Install apktool & Wine
         run: |
+          # apktool
           wget https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool -O apktool
           wget https://bitbucket.org/iBotPeaches/apktool/downloads/apktool_2.9.0.jar -O apktool.jar
           chmod +x apktool
           sudo mv apktool apktool.jar /usr/local/bin/
-
-      - name: Install Wine
-        run: |
+          # Wine
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y wine wine32 wine64 winbind
 
-      - name: Process and Decompile APK/XAPK
+      - name: Process, Merge & Rebuild APK
         run: |
           set -e
-      
+          # Find downloaded file
           FILE=$(ls downloads/*.{apk,xapk} 2>/dev/null | head -n1)
-          if [ -z "$FILE" ]; then
-            echo "❌ No .apk or .xapk found"; exit 1
-          fi
-      
-          WORKDIR=$(pwd)
-      
+          [ -n "$FILE" ] || { echo "❌ No .apk or .xapk found"; exit 1; }
+
+          TMPDIR=$(mktemp -d)
           if [[ "$FILE" == *.xapk ]]; then
             echo "📦 Detected XAPK, extracting..."
-            TMPDIR=$(mktemp -d)
             unzip -q "$FILE" -d "$TMPDIR"
-      
-            echo "📥 Extracting APKs inside XAPK..."
-            APK_LIST=($(find "$TMPDIR" -type f -name "*.apk"))
-            if [ ${#APK_LIST[@]} -eq 0 ]; then
-              echo "❌ No APKs found inside XAPK"; exit 1
-            fi
-      
-            echo "🔧 Decompiling base APK (${APK_LIST[0]})..."
-            apktool d "${APK_LIST[0]}" -o decompiled
-      
-            echo "🔗 Merging split APK contents into base..."
-            for ((i=1; i<${#APK_LIST[@]}; i++)); do
-              echo "➕ Merging ${APK_LIST[i]} → decompiled/"
-              unzip -o "${APK_LIST[i]}" -d tmp_extract
-              cp -r tmp_extract/lib/* decompiled/lib/ 2>/dev/null || true
-              cp -r tmp_extract/assets/* decompiled/assets/ 2>/dev/null || true
-              cp -r tmp_extract/res/* decompiled/res/ 2>/dev/null || true
-              rm -rf tmp_extract
+
+            echo "📥 Found APKs inside XAPK:"
+            mapfile -t APK_LIST < <(find "$TMPDIR" -type f -name "*.apk")
+            for p in "${APK_LIST[@]}"; do
+              echo "  • $(basename "$p")"
+            done
+
+            # 1) Choose the true base APK (game package)
+            BASE_APK=$(printf "%s\n" "${APK_LIST[@]}" | grep -E "com\.sega\.pjsekai" | head -n1)
+            BASE_APK=${BASE_APK:-${APK_LIST[0]}}
+
+            echo "🔧 Decompiling base APK: $(basename "$BASE_APK")"
+            apktool d "$BASE_APK" -o decompiled
+
+            echo "🔗 Merging splits into decompiled/"
+            for SPLIT in "${APK_LIST[@]}"; do
+              if [[ "$SPLIT" != "$BASE_APK" ]]; then
+                echo "  ➕ Merging: $(basename "$SPLIT")"
+                unzip -o "$SPLIT" -d tmp_extract
+                cp -r tmp_extract/lib/*     decompiled/lib/     2>/dev/null || true
+                cp -r tmp_extract/assets/*  decompiled/assets/  2>/dev/null || true
+                cp -r tmp_extract/res/*     decompiled/res/     2>/dev/null || true
+                rm -rf tmp_extract
+              fi
             done
 
             echo "📦 Rebuilding merged APK → downloads/merged.apk"
             apktool b decompiled -o downloads/merged.apk
-
           else
             echo "🔧 Decompiling single APK → decompiled/"
             apktool d "$FILE" -o decompiled
+            echo "📦 Copying single APK to downloads/merged.apk"
+            cp "$FILE" downloads/merged.apk
           fi
 
-      - name: Upload Merged APK (from XAPK)
-        if: success() && runner.os == 'Linux' && steps.process-and-decompile.outputs.FILE == '*.xapk'
+      - name: Upload Merged APK
         uses: actions/upload-artifact@v4
         with:
-          name: Merged-APK
+          name: ProjectSekai-JP-Merged-APK
           path: downloads/merged.apk
 
       - name: List files in decompiled directory
@@ -96,21 +97,19 @@ jobs:
       - name: Patch libil2cpp.so
         run: |
           set -e
-
           LIB_PATH=$(find decompiled/ -type f -path "*/libil2cpp.so" | head -n1)
-          if [ -z "$LIB_PATH" ]; then
-            echo "❌ libil2cpp.so not found"; exit 1
-          fi
+          [ -n "$LIB_PATH" ] || { echo "❌ libil2cpp.so not found"; exit 1; }
 
           echo "🔧 Patching libil2cpp.so"
-          curl -L -o JProjectSekai.exe https://github.com/felzard/patch/releases/download/1/JProjectSekai.exe
+          curl -L -o patcher.exe https://github.com/felzard/patch/releases/download/1/JProjectSekai.exe
           cd "$(dirname "$LIB_PATH")"
-          wine "$OLDPWD/JProjectSekai.exe" libil2cpp.so
-          rm libil2cpp.so "$OLDPWD/JProjectSekai.exe"
+          wine ../patcher.exe libil2cpp.so
+          rm libil2cpp.so ../patcher.exe
           mv libil2cpp_patched.so libil2cpp.so
 
       - name: Rebuild unsigned APK
-        run: apktool b decompiled -o patched-unsigned.apk
+        run: |
+          apktool b decompiled -o patched-unsigned.apk
 
       - name: Generate debug keystore
         run: |
@@ -123,7 +122,7 @@ jobs:
             -keypass android \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Sign APK (debug keystore)
+      - name: Sign APK with debug keystore
         run: |
           jarsigner \
             -verbose \
@@ -143,11 +142,11 @@ jobs:
       - name: Upload Unsigned APK
         uses: actions/upload-artifact@v4
         with:
-          name: ProjectSekai-Patched-Unsigned-APK
+          name: ProjectSekai-JP-Patched-Unsigned-APK
           path: patched-unsigned.apk
 
       - name: Upload Signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: ProjectSekai-Patched-Signed-APK
+          name: ProjectSekai-JP-Patched-Signed-APK
           path: patched-signed.apk
