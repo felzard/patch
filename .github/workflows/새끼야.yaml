@@ -109,6 +109,15 @@ jobs:
             -keypass android \
             -dname "CN=Android Debug,O=Android,C=US"
 
+      - name: Align signed APK
+        run: |
+          sudo apt-get install -y zipalign
+          if ! command -v zipalign &> /dev/null; then
+            echo "❌ zipalign not found in PATH"
+            exit 1
+          fi
+          zipalign -v -p 4 patched-unsigned.apk patched-signed.apk
+
       - name: Sign APK with debug keystore
         run: |
           jarsigner \
@@ -121,73 +130,23 @@ jobs:
             patched-unsigned.apk \
             androiddebugkey
 
-      - name: Align signed APK
+      - name: Install jq (for JSON formatting)
         run: |
-          sudo apt-get install -y zipalign
-          if ! command -v zipalign &> /dev/null; then
-            echo "❌ zipalign not found in PATH"
-            exit 1
-          fi
-          zipalign -v -p 4 patched-unsigned.apk patched-signed.apk
+          sudo apt-get install -y jq
 
-      - name: Upload Unsigned APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ProjectSekai-Unsigned-APK
-          path: patched-unsigned.apk
+      - name: Upload APKs to Discord with Metadata
+        run: |
+          VERSION=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
-      - name: Upload Signed APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ProjectSekai-Signed-APK
-          path: patched-signed.apk
+          JSON_PAYLOAD=$(jq -n \
+            --arg username "APK Bot" \
+            --arg content "📦 **New Project Sekai Build**\n\n🔖 **Version:** \`$VERSION\`\n🕒 **Built At:** $TIMESTAMP\n\nSigned and unsigned APKs attached below!" \
+            '{username: $username, content: $content}'
+          )
 
-      - name: Set up Android Emulator (ARM)
-        run: |
-          echo "Installing ARM emulator dependencies..."
-      
-          # Add SDK tools to PATH
-          export ANDROID_SDK_ROOT=$HOME/android-sdk
-          export PATH=$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools
-      
-          sdkmanager --install "system-images;android-30;google_apis;armeabi-v7a"
-          echo "no" | avdmanager create avd -n test -k "system-images;android-30;google_apis;armeabi-v7a" --device "pixel"
-          echo "hw.keyboard=yes" >> ~/.android/avd/test.avd/config.ini
-          echo "hw.gpu.enabled=no" >> ~/.android/avd/test.avd/config.ini
-          echo "hw.gpu.mode=off" >> ~/.android/avd/test.avd/config.ini
-          echo "hw.ramSize=2048" >> ~/.android/avd/test.avd/config.ini
-      
-      - name: Start Emulator in Background
-        run: |
-          export ANDROID_SDK_ROOT=$HOME/android-sdk
-          export PATH=$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools
-          nohup emulator -avd test -no-audio -no-window -accel off -gpu swiftshader_indirect -verbose > emulator.log 2>&1 &
-      
-      - name: Wait for Emulator to Boot
-        run: |
-          export PATH=$PATH:$ANDROID_HOME/platform-tools
-          adb wait-for-device
-          boot_completed=""
-          until [[ "$boot_completed" == "1" ]]; do
-            sleep 5
-            boot_completed=$(adb shell getprop sys.boot_completed | tr -d '\r')
-            echo "⏳ Waiting for emulator... ($boot_completed)"
-          done
-          echo "✅ Emulator is ready!"
-      
-      - name: Install APK
-        run: |
-          export PATH=$PATH:$ANDROID_HOME/platform-tools
-          adb install -r emulator_apk/patched-signed.apk
-      
-      - name: Verify App Installation
-        run: |
-          export PATH=$PATH:$ANDROID_HOME/platform-tools
-          adb shell pm list packages | grep com.sega.ColorfulStage.en || {
-            echo "❌ APK not installed properly"
-            exit 1
-          }
-          echo "🎉 APK installed successfully!"
-
-
+          curl -F "payload_json=$JSON_PAYLOAD" \
+               -F "file1=@patched-unsigned.apk;type=application/vnd.android.package-archive" \
+               -F "file2=@patched-signed.apk;type=application/vnd.android.package-archive" \
+               ${{ secrets.DISCORD_WEBHOOK }}
 
