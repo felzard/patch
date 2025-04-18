@@ -139,6 +139,14 @@ jobs:
           fi
           zipalign -v -p 4 patched-unsigned.apk patched-signed-aligned.apk
 
+      - name: Download apksigner (build-tools)
+        run: |
+          mkdir -p $HOME/android-sdk/build-tools
+          wget https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip -O build-tools.zip
+          unzip build-tools.zip -d $HOME/android-sdk/build-tools
+          rm build-tools.zip
+          echo "$HOME/android-sdk/build-tools/30.0.3" >> $GITHUB_PATH
+    
       - name: Sign APK with apksigner
         run: |
           echo "Signing APK with apksigner..."
