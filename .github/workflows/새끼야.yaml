@@ -14,10 +14,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install apkeep
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cargo unzip
+          sudo apt-get install -y wget unzip default-jre cargo
           cargo install apkeep
 
       - name: Download APK/XAPK from APKPure
@@ -25,126 +25,97 @@ jobs:
           mkdir -p downloads
           apkeep -a com.sega.ColorfulStage.en -d apk-pure downloads
 
-      - name: Install apktool
+      - name: Download tools from GitHub Release
+        run: |
+          wget -q https://github.com/felzard/patch/releases/download/1/apksigner.jar
+          wget -q https://github.com/felzard/patch/releases/download/1/aapt2.exe
+          wget -q https://github.com/felzard/patch/releases/download/1/APKEditor.jar
+          wget -q https://github.com/felzard/patch/releases/download/1/testkey.pk8
+          wget -q https://github.com/felzard/patch/releases/download/1/testkey.x509.pem
+
+      - name: Extract or Merge APK
+        run: |
+          FILE=$(ls downloads/*.{apk,xapk} 2>/dev/null | head -n1)
+          if [[ "$FILE" == *.xapk ]]; then
+            echo "📦 Merging XAPK using APKEditor..."
+            mkdir merged
+            cp "$FILE" merged/
+            java -jar APKEditor.jar m -i merged
+            mv merged/standalone.apk base.apk
+          else
+            echo "✅ Single APK detected"
+            cp "$FILE" base.apk
+          fi
+
+      - name: Decompile APK with apktool
         run: |
           wget https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool -O apktool
           wget https://bitbucket.org/iBotPeaches/apktool/downloads/apktool_2.9.0.jar -O apktool.jar
           chmod +x apktool
           sudo mv apktool apktool.jar /usr/local/bin/
+          apktool d base.apk -o decompiled
 
-      - name: Install Wine
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y wine wine32 wine64 winbind
-
-      - name: Process and Decompile APK/XAPK
-        run: |
-          FILE=$(ls downloads/*.{apk,xapk} 2>/dev/null | head -n1)
-          if [ -z "$FILE" ]; then echo "❌ No .apk or .xapk found"; exit 1; fi
-
-          if [[ "$FILE" == *.xapk ]]; then
-            echo "📦 Detected XAPK"
-            TMPDIR=$(mktemp -d)
-            unzip -q "$FILE" -d "$TMPDIR"
-            APK_LIST=($(find "$TMPDIR" -type f -name "*.apk"))
-            apktool d "${APK_LIST[0]}" -o decompiled
-            for ((i=1; i<${#APK_LIST[@]}; i++)); do
-              unzip -o "${APK_LIST[i]}" -d tmp_extract
-              cp -r tmp_extract/lib/* decompiled/lib/ 2>/dev/null || true
-              cp -r tmp_extract/assets/* decompiled/assets/ 2>/dev/null || true
-              cp -r tmp_extract/res/* decompiled/res/ 2>/dev/null || true
-              rm -rf tmp_extract
-            done
-          else
-            apktool d "$FILE" -o decompiled
-          fi
-
-      - name: Debug apktool.yml presence and content
+      - name: Extract APK Version
+        id: version
         run: |
           if [ -f decompiled/apktool.yml ]; then
             echo "✅ apktool.yml found!"
-            echo "-------- CONTENT --------"
             cat decompiled/apktool.yml
-            echo "-------------------------"
+            VERSION_NAME=$(grep -oP 'versionName:\s*\K\S+' decompiled/apktool.yml)
+            if [ -n "$VERSION_NAME" ]; then
+              echo "apk_version=$VERSION_NAME" >> $GITHUB_OUTPUT
+            else
+              echo "❌ versionName not found"
+              exit 1
+            fi
           else
             echo "❌ apktool.yml not found!"
             exit 1
           fi
 
-      - name: Extract APK Version
-        id: version
+      - name: Zipalign APK
         run: |
-          VERSION_NAME=$(grep -oP '^  versionName:\s*\K.+' decompiled/apktool.yml)
-          if [ -n "$VERSION_NAME" ]; then
-            echo "apk_version=$VERSION_NAME" >> $GITHUB_OUTPUT
-          else
-            echo "❌ versionName not found in apktool.yml"
-            exit 1
-          fi
+          echo "🔃 Aligning APK..."
+          wget -q https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip
+          unzip -q build-tools_r30.0.3-linux.zip -d android-tools
+          chmod +x android-tools/**/zipalign
+          ./android-tools/**/zipalign -p -f 4 base.apk aligned.apk
 
-      - name: Patch libil2cpp.so (if exists)
+      - name: Sign APK using apksigner.jar
         run: |
-          LIB_PATH=$(find decompiled/ -type f -path "*/libil2cpp.so" | head -n1)
-          if [ -z "$LIB_PATH" ]; then echo "❌ libil2cpp.so not found"; exit 1; fi
-          curl -L -o ProjectSekai.exe https://github.com/felzard/patch/releases/download/1/ProjectSekai.exe
-          cd "$(dirname "$LIB_PATH")"
-          wine "$OLDPWD/ProjectSekai.exe" libil2cpp.so
-          rm libil2cpp.so "$OLDPWD/ProjectSekai.exe"
-          mv libil2cpp_patched.so libil2cpp.so
-
-      - name: Rebuild unsigned APK
-        run: |
-          apktool b decompiled -o patched-unsigned.apk
-
-      - name: Download apksigner, aapt2, and keys
-        run: |
-          curl -L -o apksigner.jar https://github.com/felzard/patch/releases/download/1/apksigner.jar
-          curl -L -o aapt2.exe https://github.com/felzard/patch/releases/download/1/aapt2.exe
-          curl -L -o testkey.pk8 https://github.com/felzard/patch/releases/download/1/testkey.pk8
-          curl -L -o testkey.x509.pem https://github.com/felzard/patch/releases/download/1/testkey.x509.pem
-          chmod +x aapt2.exe
-
-      - name: Align APK
-        run: |
-          sudo apt-get install -y zipalign
-          zipalign -v -p 4 patched-unsigned.apk patched-aligned.apk
-
-      - name: Sign APK with apksigner.jar
-        run: |
-          echo "🔐 Signing APK..."
+          echo "🔏 Signing APK..."
           java -jar apksigner.jar sign \
             --key testkey.pk8 \
             --cert testkey.x509.pem \
-            --out patched-signed.apk \
-            patched-aligned.apk
+            --out signed.apk \
+            aligned.apk
 
       - name: Upload Unsigned APK
         uses: actions/upload-artifact@v4
         with:
           name: ProjectSekai-Unsigned-APK
-          path: patched-unsigned.apk
+          path: base.apk
 
       - name: Upload Signed APK
         uses: actions/upload-artifact@v4
         with:
           name: ProjectSekai-Signed-APK
-          path: patched-signed.apk
+          path: signed.apk
 
       - name: Notify Discord
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
           VERSION=${{ steps.version.outputs.apk_version }}
-          RUN_ID=${{ github.run_id }}
           REPO=${{ github.repository }}
+          RUN_ID=${{ github.run_id }}
+          SIGNED_URL="https://nightly.link/$REPO/actions/runs/$RUN_ID/ProjectSekai-Signed-APK.zip"
+          UNSIGNED_URL="https://nightly.link/$REPO/actions/runs/$RUN_ID/ProjectSekai-Unsigned-APK.zip"
 
-          SIGNED_URL="https://nightly.link/${REPO}/actions/runs/${RUN_ID}/ProjectSekai-Signed-APK.zip"
-          UNSIGNED_URL="https://nightly.link/${REPO}/actions/runs/${RUN_ID}/ProjectSekai-Unsigned-APK.zip"
-
+          echo "📣 Sending Discord webhook..."
           curl -H "Content-Type: application/json" \
             -X POST \
             -d '{
-              "content": "**✅ Project Sekai APK (Global) New APKs available!**\n**Version:** '"$VERSION"'\n\n📥 **Signed APK:** '"$SIGNED_URL"'\n📥 **Unsigned APK:** '"$UNSIGNED_URL"'"
+              "content": "**✅ Project Sekai APK Build Complete**\n**Version:** '"$VERSION"'\n\n🔐 Signed: '"$SIGNED_URL"'\n📦 Unsigned: '"$UNSIGNED_URL"'"
             }' \
             $DISCORD_WEBHOOK
