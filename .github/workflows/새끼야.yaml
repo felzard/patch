@@ -50,8 +50,10 @@ jobs:
           unzip commandlinetools.zip -d $ANDROID_SDK_ROOT
           rm commandlinetools.zip
 
-          # Install necessary SDK packages
+          # Ensure the correct environment variable is set for sdkmanager
           export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
+          
+          # Install necessary SDK packages
           yes | sdkmanager --licenses
           sdkmanager "platform-tools" "build-tools;30.0.3" "platforms;android-30"
 
