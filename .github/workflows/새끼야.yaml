@@ -149,13 +149,19 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_3
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: "-no-snapshot-save -noaudio -no-boot-anim -accel auto"
           script: |
             echo "✅ Emulator ready, installing APK..."
-            adb install patched-signed.apk
-
+            adb wait-for-device
+            adb devices
+            adb install -r patched-signed.apk
+      
             echo "📱 Verifying install..."
             adb shell pm list packages | grep com.sega.ColorfulStage.en || {
               echo "❌ APK not installed"; exit 1;
             }
-
+      
             echo "🎉 Successfully installed on emulator!"
+
