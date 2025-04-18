@@ -38,24 +38,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wine wine32 wine64 winbind
 
-      - name: Install Android SDK and Build Tools (including apksigner)
+      - name: Install Android SDK Tools and Build Tools
         run: |
-          echo "Installing Android SDK..."
-          sudo apt-get install -y wget unzip openjdk-8-jdk
-          mkdir -p $HOME/android-sdk
-          export ANDROID_SDK_ROOT=$HOME/android-sdk
-          
-          # Download and extract SDK Command-line Tools
+          echo "Installing Android SDK and Build Tools..."
+
+          # Download command-line tools and extract them
           wget https://dl.google.com/android/repository/commandlinetools-linux-7583922_latest.zip -O commandlinetools.zip
-          unzip commandlinetools.zip -d $ANDROID_SDK_ROOT
+          unzip commandlinetools.zip -d $HOME/android-sdk
           rm commandlinetools.zip
 
-          # Ensure the correct environment variable is set for sdkmanager
+          # Ensure environment variables are set correctly for the SDK
+          export ANDROID_SDK_ROOT=$HOME/android-sdk
           export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
-          
-          # Install necessary SDK packages
-          yes | sdkmanager --licenses
-          sdkmanager "platform-tools" "build-tools;30.0.3" "platforms;android-30"
+
+          # Download necessary build tools and platform tools
+          wget https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip -O build-tools.zip
+          unzip build-tools.zip -d $HOME/android-sdk
+          rm build-tools.zip
+
+          # Add build-tools directory to the PATH
+          export PATH=$PATH:$ANDROID_SDK_ROOT/build-tools/30.0.3
 
       - name: Process and Decompile APK/XAPK
         run: |
@@ -160,5 +162,7 @@ jobs:
           DISCORD_WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
           GITHUB_RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           curl -X POST -H "Content-Type: application/json" \
+            -d '{"content": "APK Build: ${GITHUB_SHA}\nVersion: v1.0.0\nTimestamp: $(date +%Y-%m-%d_%H-%M-%S)","embeds":[{"title":"APK Files","description":"The APK is ready!","url":"'"$GITHUB_RUN_URL"'","color":5814783,"fields":[{"name":"Unsigned APK","value":"[ProjectSekai-Unsigned-APK](artifact link)"}]}]}' \
+            $DISCORD_WEBHOOK_URL
             -d '{"content": "APK Build: ${GITHUB_SHA}\nVersion: v1.0.0\nTimestamp: $(date +%Y-%m-%d_%H-%M-%S)","embeds":[{"title":"APK Files","description":"The APK is ready!","url":"'"$GITHUB_RUN_URL"'","color":5814783,"fields":[{"name":"Unsigned APK","value":"[ProjectSekai-Unsigned-APK](artifact link)"}]}]}' \
             $DISCORD_WEBHOOK_URL
