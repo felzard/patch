@@ -83,28 +83,33 @@ jobs:
             cp "$FILE" downloads/merged.apk
           fi
 
-      - name: Upload Merged APK
+      - name: Upload merged APK (if from XAPK)
+        if: success() && hashFiles('downloads/merged.apk') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: ProjectSekai-JP-Merged-APK
+          name: Merged-APK
           path: downloads/merged.apk
 
       - name: List files in decompiled directory
         run: |
-          echo "📂 Contents of decompiled/:"
+          echo "📂 Listing all files in decompiled directory:"
           find decompiled/ -type f | sort
 
-      - name: Patch libil2cpp.so
+      - name: Patch libil2cpp.so (if exists)
         run: |
           set -e
-          LIB_PATH=$(find decompiled/ -type f -path "*/libil2cpp.so" | head -n1)
-          [ -n "$LIB_PATH" ] || { echo "❌ libil2cpp.so not found"; exit 1; }
 
-          echo "🔧 Patching libil2cpp.so"
-          curl -L -o patcher.exe https://github.com/felzard/patch/releases/download/1/JProjectSekai.exe
+          LIB_PATH=$(find decompiled/ -type f -path "*/libil2cpp.so" | head -n1)
+          if [ -z "$LIB_PATH" ]; then
+            echo "❌ libil2cpp.so not found in decompiled directory"
+            exit 1
+          fi
+
+          echo "🔧 Found libil2cpp.so at $LIB_PATH, patching..."
+          curl -L -o JProjectSekai.exe https://github.com/felzard/patch/releases/download/1/JProjectSekai.exe
           cd "$(dirname "$LIB_PATH")"
-          wine ../patcher.exe libil2cpp.so
-          rm libil2cpp.so ../patcher.exe
+          wine "$OLDPWD/JProjectSekai.exe" libil2cpp.so
+          rm libil2cpp.so "$OLDPWD/JProjectSekai.exe"
           mv libil2cpp_patched.so libil2cpp.so
 
       - name: Rebuild unsigned APK
@@ -137,6 +142,10 @@ jobs:
       - name: Align signed APK
         run: |
           sudo apt-get install -y zipalign
+          if ! command -v zipalign &> /dev/null; then
+            echo "❌ zipalign not found in PATH"
+            exit 1
+          fi
           zipalign -v -p 4 patched-unsigned.apk patched-signed.apk
 
       - name: Upload Unsigned APK
