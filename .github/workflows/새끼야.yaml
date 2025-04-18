@@ -17,7 +17,7 @@ jobs:
       - name: Install apkeep
         run: |
           sudo apt-get update
-          sudo apt-get install -y cargo
+          sudo apt-get install -y cargo unzip
           cargo install apkeep
 
       - name: Download APK/XAPK from APKPure
@@ -38,77 +38,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wine wine32 wine64 winbind
 
-      - name: Install Android SDK Tools and Build Tools
-        run: |
-          echo "Installing Android SDK and Build Tools..."
-
-          # Download command-line tools and extract them
-          wget https://dl.google.com/android/repository/commandlinetools-linux-7583922_latest.zip -O commandlinetools.zip
-          unzip commandlinetools.zip -d $HOME/android-sdk
-          rm commandlinetools.zip
-
-          # Ensure environment variables are set correctly for the SDK
-          export ANDROID_SDK_ROOT=$HOME/android-sdk
-          export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
-
-          # Download necessary build tools and platform tools
-          wget https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip -O build-tools.zip
-          unzip build-tools.zip -d $HOME/android-sdk
-          rm build-tools.zip
-
-          # Add build-tools directory to the PATH
-          export PATH=$PATH:$ANDROID_SDK_ROOT/build-tools/30.0.3
-
       - name: Process and Decompile APK/XAPK
         run: |
-          set -e
           FILE=$(ls downloads/*.{apk,xapk} 2>/dev/null | head -n1)
           if [ -z "$FILE" ]; then echo "❌ No .apk or .xapk found"; exit 1; fi
-          WORKDIR=$(pwd)
 
           if [[ "$FILE" == *.xapk ]]; then
-            echo "📦 Detected XAPK, extracting..."
+            echo "📦 Detected XAPK"
             TMPDIR=$(mktemp -d)
             unzip -q "$FILE" -d "$TMPDIR"
-
-            echo "📥 Extracting and processing APKs inside XAPK..."
             APK_LIST=($(find "$TMPDIR" -type f -name "*.apk"))
-            if [ ${#APK_LIST[@]} -eq 0 ]; then echo "❌ No APKs found inside XAPK"; exit 1; fi
-
-            echo "🔧 Decompiling base APK (${APK_LIST[0]}) → decompiled/"
             apktool d "${APK_LIST[0]}" -o decompiled
-
-            echo "🔗 Merging split APK contents into base decompiled folder..."
             for ((i=1; i<${#APK_LIST[@]}; i++)); do
-              echo "➕ Merging: ${APK_LIST[i]}"
               unzip -o "${APK_LIST[i]}" -d tmp_extract
-              ls -R tmp_extract/lib || echo "❌ No libs in this split"
               cp -r tmp_extract/lib/* decompiled/lib/ 2>/dev/null || true
               cp -r tmp_extract/assets/* decompiled/assets/ 2>/dev/null || true
               cp -r tmp_extract/res/* decompiled/res/ 2>/dev/null || true
               rm -rf tmp_extract
             done
           else
-            echo "🔧 Decompiling single APK → decompiled/"
             apktool d "$FILE" -o decompiled
           fi
 
-      - name: List all .so files
-        run: find decompiled/ -type f -name "*.so"
-
       - name: Patch libil2cpp.so (if exists)
         run: |
-          set -e
-          echo "🔍 Searching for libil2cpp.so in decompiled APK..."
-          find decompiled/ -type f -name "libil2cpp.so" || echo "No .so found."
-
           LIB_PATH=$(find decompiled/ -type f -path "*/libil2cpp.so" | head -n1)
-          if [ -z "$LIB_PATH" ]; then
-            echo "❌ libil2cpp.so not found in decompiled directory"
-            exit 1
-          fi
-
-          echo "🔧 Found libil2cpp.so at $LIB_PATH, patching..."
+          if [ -z "$LIB_PATH" ]; then echo "❌ libil2cpp.so not found"; exit 1; fi
           curl -L -o ProjectSekai.exe https://github.com/felzard/patch/releases/download/1/ProjectSekai.exe
           cd "$(dirname "$LIB_PATH")"
           wine "$OLDPWD/ProjectSekai.exe" libil2cpp.so
@@ -119,38 +74,27 @@ jobs:
         run: |
           apktool b decompiled -o patched-unsigned.apk
 
-      - name: Generate debug keystore
+      - name: Download apksigner, aapt2, and keys
         run: |
-          keytool -genkey -v \
-            -keystore debug.keystore \
-            -alias androiddebugkey \
-            -keyalg RSA -keysize 2048 \
-            -validity 10000 \
-            -storepass android \
-            -keypass android \
-            -dname "CN=Android Debug,O=Android,C=US"
+          curl -L -o apksigner.jar https://github.com/felzard/patch/releases/download/1/apksigner.jar
+          curl -L -o aapt2.exe https://github.com/felzard/patch/releases/download/1/aapt2.exe
+          curl -L -o testkey.pk8 https://github.com/felzard/patch/releases/download/1/testkey.pk8
+          curl -L -o testkey.x509.pem https://github.com/felzard/patch/releases/download/1/testkey.x509.pem
+          chmod +x aapt2.exe
 
-      - name: Align APK (before signing)
+      - name: Align APK
         run: |
           sudo apt-get install -y zipalign
-          if ! command -v zipalign &> /dev/null; then
-            echo "❌ zipalign not found in PATH"
-            exit 1
-          fi
-          zipalign -v -p 4 patched-unsigned.apk patched-signed-aligned.apk
+          zipalign -v -p 4 patched-unsigned.apk patched-aligned.apk
 
-      - name: Download apksigner (build-tools)
+      - name: Sign APK with apksigner.jar
         run: |
-          mkdir -p $HOME/android-sdk/build-tools
-          wget https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip -O build-tools.zip
-          unzip build-tools.zip -d $HOME/android-sdk/build-tools
-          rm build-tools.zip
-          echo "$HOME/android-sdk/build-tools/30.0.3" >> $GITHUB_PATH
-    
-      - name: Sign APK with apksigner
-        run: |
-          echo "Signing APK with apksigner..."
-          apksigner sign --ks debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android --out patched-signed.apk patched-signed-aligned.apk
+          echo "🔐 Signing APK..."
+          java -jar apksigner.jar sign \
+            --key testkey.pk8 \
+            --cert testkey.x509.pem \
+            --out patched-signed.apk \
+            patched-aligned.apk
 
       - name: Upload Unsigned APK
         uses: actions/upload-artifact@v4
@@ -164,13 +108,13 @@ jobs:
           name: ProjectSekai-Signed-APK
           path: patched-signed.apk
 
-      - name: Upload APK Link to Discord
+      - name: Send Discord Notification with Artifact URLs
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          echo "📤 Uploading APK link to Discord..."
-          DISCORD_WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
-          GITHUB_RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          curl -X POST -H "Content-Type: application/json" \
-            -d '{"content": "APK Build: ${GITHUB_SHA}\nVersion: v1.0.0\nTimestamp: $(date +%Y-%m-%d_%H-%M-%S)","embeds":[{"title":"APK Files","description":"The APK is ready!","url":"'"$GITHUB_RUN_URL"'","color":5814783,"fields":[{"name":"Unsigned APK","value":"[ProjectSekai-Unsigned-APK](artifact link)"}]}]}' \
-            $DISCORD_WEBHOOK_URL
-            -d '{"content": "APK Build: ${GITHUB_SHA}\nVersion: v1.0.0\nTimestamp: $(date +%Y-%m-%d_%H-%M-%S)","embeds":[{"title":"APK Files","description":"The APK is ready!","url":"'"$GITHUB_RUN_URL"'","color":5814783,"fields":[{"name":"Unsigned APK","value":"[ProjectSekai-Unsigned-APK](artifact link)"}]}]}' \
-            $DISCORD_WEBHOOK_URL
+          TIMESTAMP=$(date)
+          ARTIFACT_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -H "Content-Type: application/json" \
+            -X POST \
+            -d "{\"content\": \"✅ New APKs available\n🕓 Timestamp: $TIMESTAMP\n🔗 $ARTIFACT_URL\"}" \
+            "$DISCORD_WEBHOOK"
