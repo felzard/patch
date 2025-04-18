@@ -145,6 +145,11 @@ jobs:
       - name: Set up Android Emulator (ARM)
         run: |
           echo "Installing ARM emulator dependencies..."
+      
+          # Add SDK tools to PATH
+          export ANDROID_SDK_ROOT=$HOME/android-sdk
+          export PATH=$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools
+      
           sdkmanager --install "system-images;android-30;google_apis;armeabi-v7a"
           echo "no" | avdmanager create avd -n test -k "system-images;android-30;google_apis;armeabi-v7a" --device "pixel"
           echo "hw.keyboard=yes" >> ~/.android/avd/test.avd/config.ini
@@ -154,10 +159,13 @@ jobs:
       
       - name: Start Emulator in Background
         run: |
+          export ANDROID_SDK_ROOT=$HOME/android-sdk
+          export PATH=$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools
           nohup emulator -avd test -no-audio -no-window -accel off -gpu swiftshader_indirect -verbose > emulator.log 2>&1 &
       
       - name: Wait for Emulator to Boot
         run: |
+          export PATH=$PATH:$ANDROID_HOME/platform-tools
           adb wait-for-device
           boot_completed=""
           until [[ "$boot_completed" == "1" ]]; do
@@ -169,14 +177,17 @@ jobs:
       
       - name: Install APK
         run: |
+          export PATH=$PATH:$ANDROID_HOME/platform-tools
           adb install -r emulator_apk/patched-signed.apk
       
       - name: Verify App Installation
         run: |
+          export PATH=$PATH:$ANDROID_HOME/platform-tools
           adb shell pm list packages | grep com.sega.ColorfulStage.en || {
             echo "❌ APK not installed properly"
             exit 1
           }
           echo "🎉 APK installed successfully!"
+
 
 
