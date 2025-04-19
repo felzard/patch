@@ -113,29 +113,60 @@ jobs:
           event-type: build-global-apk
 
       - name: Notify Discord
-        if: steps.check_jp.outputs.new_jp == 'true' || steps.check_global.outputs.new_global == 'true'
+        if: ${{ steps.check_jp.outputs.new_jp == 'true' || steps.check_global.outputs.new_global == 'true' }}
         env:
           DISCORD_WEBHOOK: ${{ secrets.UPDATE_NOTIFICATION }}
         run: |
-          JP_VERSION="${{ steps.jp.outputs.apk_version }}"
-          GLOBAL_VERSION="${{ steps.global.outputs.apk_version }}"
+          JP_VERSION="${{ steps.check_jp.outputs.apk_version }}"
+          GLOBAL_VERSION="${{ steps.check_global.outputs.apk_version }}"
+          JP_COLOR=5763719  # Green
+          GLOBAL_COLOR=5763719  # Green
+      
+          if [ "${{ steps.check_jp.outputs.new_jp }}" != 'true' ]; then
+            JP_COLOR=9807270
+          fi
+      
+          if [ "${{ steps.check_global.outputs.new_global }}" != 'true' ]; then
+            GLOBAL_COLOR=9807270
+          fi
+      
           curl -H "Content-Type: application/json" \
-            -X POST \
-            -d '{
-              "embeds": [{
-                "title": "🔔 Project Sekai Update Check",
-                "fields": [
-                  {
-                    "name": "JP Version",
-                    "value": "'"$JP_VERSION"'",
-                    "inline": true
-                  },
-                  {
-                    "name": "Global Version",
-                    "value": "'"$GLOBAL_VERSION"'",
-                    "inline": true
-                  }
-                ]
-              }]
-            }' \
-            $DISCORD_WEBHOOK
+               -X POST \
+               -d '{
+                 "embeds": [
+                   {
+                     "title": "🔔 Project Sekai Update Check",
+                     "color": '"$JP_COLOR"',
+                     "fields": [
+                       {
+                         "name": "JP Version",
+                         "value": "'"$JP_VERSION"'",
+                         "inline": true
+                       },
+                       {
+                         "name": "Status",
+                         "value": "'"$([[ "${{ steps.check_jp.outputs.new_jp }}" == 'true' ]] && echo '🟢 New update available!' || echo '⚪ No update.')"'",
+                         "inline": true
+                       }
+                     ]
+                   },
+                   {
+                     "title": "Global Version",
+                     "color": '"$GLOBAL_COLOR"',
+                     "fields": [
+                       {
+                         "name": "Version",
+                         "value": "'"$GLOBAL_VERSION"'",
+                         "inline": true
+                       },
+                       {
+                         "name": "Status",
+                         "value": "'"$([[ "${{ steps.check_global.outputs.new_global }}" == 'true' ]] && echo '🟢 New update available!' || echo '⚪ No update.')"'",
+                         "inline": true
+                       }
+                     ]
+                   }
+                 ]
+               }' \
+               $DISCORD_WEBHOOK
+
