@@ -1,9 +1,8 @@
 name: Global (CI/CD)
 
 on:
-  push:
-    branches:
-      - main
+  repository_dispatch:
+    types: [build-global-apk]
   workflow_dispatch:
 
 jobs:
