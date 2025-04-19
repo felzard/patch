@@ -8,22 +8,63 @@ on:
 jobs:
   check-updates:
     runs-on: ubuntu-latest
-    env:
-      UPDATE_NOTIFICATION: ${{ secrets.UPDATE_NOTIFICATION }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install apkeep
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cargo
+          sudo apt-get install -y cargo unzip wget default-jre
           cargo install apkeep
 
-      - name: Check JP version
+      - name: Install apktool
+        run: |
+          wget https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool -O apktool
+          wget https://bitbucket.org/iBotPeaches/apktool/downloads/apktool_2.9.0.jar -O apktool.jar
+          chmod +x apktool
+          sudo mv apktool apktool.jar /usr/local/bin/
+
+      - name: Download APKs
+        run: |
+          mkdir -p downloads
+          apkeep -a com.sega.pjsekai -d apk-pure downloads
+          apkeep -a com.sega.ColorfulStage.en -d apk-pure downloads
+
+      - name: Install APKEditor
+        run: |
+          curl -L -o APKEditor.jar https://github.com/felzard/patch/releases/download/1/apkeditor.jar
+
+      - name: Process JP APK
+        id: jp
+        run: |
+          FILE=$(ls downloads/com.sega.pjsekai*.{apk,xapk} 2>/dev/null | head -n1)
+          if [[ "$FILE" == *.xapk ]]; then
+            java -jar APKEditor.jar m -i "$FILE" -o merged_jp.apk
+          else
+            cp "$FILE" merged_jp.apk
+          fi
+          apktool d merged_jp.apk -o decompiled_jp
+          VERSION_NAME=$(grep -oP '^  versionName:\s*\K.+' decompiled_jp/apktool.yml)
+          echo "apk_version=$VERSION_NAME" >> $GITHUB_OUTPUT
+
+      - name: Process Global APK
+        id: global
+        run: |
+          FILE=$(ls downloads/com.sega.ColorfulStage.en*.{apk,xapk} 2>/dev/null | head -n1)
+          if [[ "$FILE" == *.xapk ]]; then
+            java -jar APKEditor.jar m -i "$FILE" -o merged_global.apk
+          else
+            cp "$FILE" merged_global.apk
+          fi
+          apktool d merged_global.apk -o decompiled_global
+          VERSION_NAME=$(grep -oP '^  versionName:\s*\K.+' decompiled_global/apktool.yml)
+          echo "apk_version=$VERSION_NAME" >> $GITHUB_OUTPUT
+
+      - name: Compare JP version
         id: check_jp
         run: |
-          latest_jp=$(curl -s https://apkpure.com/pjsekai/com.sega.pjsekai | grep -oP 'Version\s*\K[\d.]+' | head -n1)
+          latest_jp="${{ steps.jp.outputs.apk_version }}"
           current_jp=$(cat version_jp.md)
           echo "Latest JP version: $latest_jp"
           echo "Current JP version: $current_jp"
@@ -34,10 +75,10 @@ jobs:
             echo "new_jp=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check Global version
+      - name: Compare Global version
         id: check_global
         run: |
-          latest_global=$(curl -s https://apkpure.com/hatsune-miku-colorful-stage-en/com.sega.ColorfulStage.en | grep -oP 'Version\s*\K[\d.]+' | head -n1)
+          latest_global="${{ steps.global.outputs.apk_version }}"
           current_global=$(cat version_en.md)
           echo "Latest Global version: $latest_global"
           echo "Current Global version: $current_global"
@@ -73,23 +114,28 @@ jobs:
 
       - name: Notify Discord
         if: steps.check_jp.outputs.new_jp == 'true' || steps.check_global.outputs.new_global == 'true'
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.UPDATE_NOTIFICATION }}
         run: |
-          NEW_JP=${{ steps.check_jp.outputs.new_jp }}
-          NEW_GLOBAL=${{ steps.check_global.outputs.new_global }}
-          VERSION_JP=$(cat version_jp.md)
-          VERSION_GLOBAL=$(cat version_en.md)
-
-          CONTENT=""
-
-          if [ "$NEW_JP" == "true" ]; then
-            CONTENT="${CONTENT}🆕 **JP Update Detected**\nVersion: \`${VERSION_JP}\`\n"
-          fi
-
-          if [ "$NEW_GLOBAL" == "true" ]; then
-            CONTENT="${CONTENT}🆕 **Global Update Detected**\nVersion: \`${VERSION_GLOBAL}\`\n"
-          fi
-
+          JP_VERSION="${{ steps.jp.outputs.apk_version }}"
+          GLOBAL_VERSION="${{ steps.global.outputs.apk_version }}"
           curl -H "Content-Type: application/json" \
             -X POST \
-            -d "{\"content\": \"$CONTENT\"}" \
-            $UPDATE_NOTIFICATION
+            -d '{
+              "embeds": [{
+                "title": "🔔 Project Sekai Update Check",
+                "fields": [
+                  {
+                    "name": "JP Version",
+                    "value": "'"$JP_VERSION"'",
+                    "inline": true
+                  },
+                  {
+                    "name": "Global Version",
+                    "value": "'"$GLOBAL_VERSION"'",
+                    "inline": true
+                  }
+                ]
+              }]
+            }' \
+            $DISCORD_WEBHOOK
