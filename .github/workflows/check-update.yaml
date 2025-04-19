@@ -92,8 +92,8 @@ jobs:
       - name: Commit version updates
         if: steps.check_jp.outputs.new_jp == 'true' || steps.check_global.outputs.new_global == 'true'
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          git config user.name "Simanjuntaksekai"
+          git config user.email "rajahitam@jawajawajawa.com"
           git add version_jp.md version_en.md
           git commit -m "Update version files"
           git push
