@@ -140,6 +140,25 @@ jobs:
           curl -H "Content-Type: application/json" \
             -X POST \
             -d '{
-              "content": "**✅ Project Sekai APK (Global) New APKs available!**\n**Version:** '"$VERSION"'\n\n📥 **Signed APK:** '"$SIGNED_URL"'\n📥 **Unsigned APK:** '"$UNSIGNED_URL"'"
+              "embeds": [{
+                "title": "✨ Project Sekai APK (Global) New APKs available!",
+                "fields": [
+                  {
+                    "name": "Version",
+                    "value": "**'"$VERSION"'**",
+                    "inline": true
+                  },
+                  {
+                    "name": "Signed APK",
+                    "value": "[Download Signed APK]('"$SIGNED_URL"')",
+                    "inline": true
+                  },
+                  {
+                    "name": "Unsigned APK",
+                    "value": "[Download Unsigned APK]('"$UNSIGNED_URL"')",
+                    "inline": true
+                  }
+                ]
+              }]
             }' \
             $DISCORD_WEBHOOK
