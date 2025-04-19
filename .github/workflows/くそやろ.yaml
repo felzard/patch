@@ -141,7 +141,7 @@ jobs:
             -X POST \
             -d '{
               "embeds": [{
-                "title": "✨ Project Sekai APK (JP) New APKs available! :nerdchad:",
+                "title": "✨ Project Sekai APK (JP) New APKs available!",
                 "fields": [
                   {
                     "name": "Version",
