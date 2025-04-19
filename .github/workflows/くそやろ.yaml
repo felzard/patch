@@ -1,9 +1,8 @@
 name: JP (CI/CD)
 
 on:
-  push:
-    branches:
-      - main
+  repository_dispatch:
+    types: [build-jp-apk]
   workflow_dispatch:
 
 jobs:
