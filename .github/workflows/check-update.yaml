@@ -23,7 +23,7 @@ jobs:
       - name: Check JP version
         id: check_jp
         run: |
-          latest_jp=$(apkeep -l -a com.sega.pjsekai | head -n1)
+          latest_jp=$(curl -s https://apkpure.com/pjsekai/com.sega.pjsekai | grep -oP 'Version\s*\K[\d.]+' | head -n1)
           current_jp=$(cat version_jp.md)
           echo "Latest JP version: $latest_jp"
           echo "Current JP version: $current_jp"
@@ -37,7 +37,7 @@ jobs:
       - name: Check Global version
         id: check_global
         run: |
-          latest_global=$(apkeep -l -a com.sega.ColorfulStage.en | head -n1)
+          latest_global=$(curl -s https://apkpure.com/hatsune-miku-colorful-stage-en/com.sega.ColorfulStage.en | grep -oP 'Version\s*\K[\d.]+' | head -n1)
           current_global=$(cat version_en.md)
           echo "Latest Global version: $latest_global"
           echo "Current Global version: $current_global"
