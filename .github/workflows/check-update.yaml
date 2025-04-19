@@ -1,0 +1,95 @@
+name: Check for Updates
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+    env:
+      UPDATE_NOTIFICATION: ${{ secrets.UPDATE_NOTIFICATION }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install apkeep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cargo
+          cargo install apkeep
+
+      - name: Check JP version
+        id: check_jp
+        run: |
+          latest_jp=$(apkeep -l -a com.sega.pjsekai | head -n1)
+          current_jp=$(cat version_jp.md)
+          echo "Latest JP version: $latest_jp"
+          echo "Current JP version: $current_jp"
+          if [ "$latest_jp" != "$current_jp" ]; then
+            echo "new_jp=true" >> $GITHUB_OUTPUT
+            echo "$latest_jp" > version_jp.md
+          else
+            echo "new_jp=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check Global version
+        id: check_global
+        run: |
+          latest_global=$(apkeep -l -a com.sega.ColorfulStage.en | head -n1)
+          current_global=$(cat version_en.md)
+          echo "Latest Global version: $latest_global"
+          echo "Current Global version: $current_global"
+          if [ "$latest_global" != "$current_global" ]; then
+            echo "new_global=true" >> $GITHUB_OUTPUT
+            echo "$latest_global" > version_en.md
+          else
+            echo "new_global=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit version updates
+        if: steps.check_jp.outputs.new_jp == 'true' || steps.check_global.outputs.new_global == 'true'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add version_jp.md version_en.md
+          git commit -m "Update version files"
+          git push
+
+      - name: Trigger JP CI/CD
+        if: steps.check_jp.outputs.new_jp == 'true'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: build-jp-apk
+
+      - name: Trigger Global CI/CD
+        if: steps.check_global.outputs.new_global == 'true'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: build-global-apk
+
+      - name: Notify Discord
+        if: steps.check_jp.outputs.new_jp == 'true' || steps.check_global.outputs.new_global == 'true'
+        run: |
+          NEW_JP=${{ steps.check_jp.outputs.new_jp }}
+          NEW_GLOBAL=${{ steps.check_global.outputs.new_global }}
+          VERSION_JP=$(cat version_jp.md)
+          VERSION_GLOBAL=$(cat version_en.md)
+
+          CONTENT=""
+
+          if [ "$NEW_JP" == "true" ]; then
+            CONTENT="${CONTENT}🆕 **JP Update Detected**\nVersion: \`${VERSION_JP}\`\n"
+          fi
+
+          if [ "$NEW_GLOBAL" == "true" ]; then
+            CONTENT="${CONTENT}🆕 **Global Update Detected**\nVersion: \`${VERSION_GLOBAL}\`\n"
+          fi
+
+          curl -H "Content-Type: application/json" \
+            -X POST \
+            -d "{\"content\": \"$CONTENT\"}" \
+            $UPDATE_NOTIFICATION
