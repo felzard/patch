@@ -117,10 +117,10 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.UPDATE_NOTIFICATION }}
         run: |
-          JP_VERSION="${{ steps.check_jp.outputs.apk_version }}"
-          GLOBAL_VERSION="${{ steps.check_global.outputs.apk_version }}"
-          JP_COLOR=5763719  # Green
-          GLOBAL_COLOR=5763719  # Green
+          JP_VERSION="${{ steps.jp.outputs.apk_version }}"
+          GLOBAL_VERSION="${{ steps.global.outputs.apk_version }}"
+          JP_COLOR=5763719
+          GLOBAL_COLOR=5763719
       
           if [ "${{ steps.check_jp.outputs.new_jp }}" != 'true' ]; then
             JP_COLOR=9807270
@@ -135,11 +135,11 @@ jobs:
                -d '{
                  "embeds": [
                    {
-                     "title": "🔔 Project Sekai Update Check",
+                     "title": "🔔 Project Sekai JP Update Check",
                      "color": '"$JP_COLOR"',
                      "fields": [
                        {
-                         "name": "JP Version",
+                         "name": "Version",
                          "value": "'"$JP_VERSION"'",
                          "inline": true
                        },
@@ -151,7 +151,7 @@ jobs:
                      ]
                    },
                    {
-                     "title": "Global Version",
+                     "title": "🔔 Project Sekai Global Update Check",
                      "color": '"$GLOBAL_COLOR"',
                      "fields": [
                        {
