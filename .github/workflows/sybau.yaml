@@ -100,7 +100,7 @@ jobs:
           if [ -z "$LIB_DIR" ]; then echo "❌ libil2cpp.so not found"; exit 1; fi
 
           echo "📂 Copying native libs to $LIB_DIR"
-          cp -r tmp_modmenu/lib/* "$LIB_DIR/"
+          cp -r tmp_modmenu/lib/arm64-v8a/* "$LIB_DIR/"
 
           echo "🔍 Finding correct smali folder..."
           TARGET_SMALI=$(grep -oP '(smali_classes\d+|smali)' modmenu_output.txt | head -n1)
@@ -154,7 +154,7 @@ jobs:
             -X POST \
             -d '{
               "embeds": [{
-                "title": "✨ Project Sekai APK (JP) New APKs available!",
+                "title": "✨ Project Sekai APK Mod Menu (JP) New APKs available!",
                 "fields": [
                   {
                     "name": "Version",
