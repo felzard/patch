@@ -112,6 +112,20 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           event-type: build-global-apk
 
+      - name: Trigger JP Menu CI/CD
+        if: steps.check_jp.outputs.new_jp == 'true'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: build-jp-menu-apk
+
+      - name: Trigger Global Menu CI/CD
+        if: steps.check_global.outputs.new_global == 'true'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: build-global-menu-apk
+
       - name: Notify Discord
         if: ${{ steps.check_jp.outputs.new_jp == 'true' || steps.check_global.outputs.new_global == 'true' }}
         env:
