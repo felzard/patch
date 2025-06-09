@@ -1,4 +1,4 @@
-name: SYBAU
+name: SYBAU BRO
 
 on:
   push:
@@ -37,7 +37,7 @@ jobs:
           }
           pip install -r $req.FullName
 
-      - name: Find and run main.py
+      - name: Find and run main.py with correct working directory
         shell: pwsh
         run: |
           $main = Get-ChildItem -Recurse -Filter main.py | Select-Object -First 1
@@ -45,7 +45,9 @@ jobs:
             Write-Error "main.py not found"
             exit 1
           }
-          python $main.FullName
+          $mainDir = Split-Path $main.FullName
+          Set-Location $mainDir
+          python main.py
 
       - name: Upload accounts.txt and cookies.txt (if found)
         uses: actions/upload-artifact@v4
