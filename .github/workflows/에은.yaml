@@ -1,13 +1,14 @@
-name: Download, Unzip, and Run Python Script
+name: SYBAU
 
 on:
   push:
     branches: [ "main" ]
-
   workflow_dispatch:
+
 jobs:
   run-python-script:
     runs-on: windows-latest
+
     steps:
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -27,7 +28,15 @@ jobs:
         run: Expand-Archive -Path "something.zip" -DestinationPath "." -Force
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r ./something/requirements.txt
 
       - name: Execute Python script
-        run: python main.py
+        run: python ./something/main.py
+
+      - name: Upload accounts.txt and cookies.txt
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-data
+          path: |
+            ./something/accounts.txt
+            ./something/cookies.txt
