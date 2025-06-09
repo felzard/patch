@@ -1,0 +1,33 @@
+name: Download, Unzip, and Run Python Script
+
+on:
+  push:
+    branches: [ "main" ]
+
+  workflow_dispatch:
+jobs:
+  run-python-script:
+    runs-on: windows-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Download application archive
+        shell: pwsh
+        run: |
+          $url = "https://github.com/felzard/patch/releases/download/1/something.zip"
+          $outputFile = "something.zip"
+          Write-Host "Downloading from $url to $outputFile"
+          Invoke-WebRequest -Uri $url -OutFile $outputFile
+
+      - name: Extract application archive
+        shell: pwsh
+        run: Expand-Archive -Path "something.zip" -DestinationPath "." -Force
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Execute Python script
+        run: python main.py
