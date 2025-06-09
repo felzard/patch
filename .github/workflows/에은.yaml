@@ -27,16 +27,31 @@ jobs:
         shell: pwsh
         run: Expand-Archive -Path "something.zip" -DestinationPath "." -Force
 
-      - name: Install Python dependencies
-        run: pip install -r ./something/requirements.txt
+      - name: Find and install Python dependencies
+        shell: pwsh
+        run: |
+          $req = Get-ChildItem -Recurse -Filter requirements.txt | Select-Object -First 1
+          if (-not $req) {
+            Write-Error "requirements.txt not found"
+            exit 1
+          }
+          pip install -r $req.FullName
 
-      - name: Execute Python script
-        run: python ./something/main.py
+      - name: Find and run main.py
+        shell: pwsh
+        run: |
+          $main = Get-ChildItem -Recurse -Filter main.py | Select-Object -First 1
+          if (-not $main) {
+            Write-Error "main.py not found"
+            exit 1
+          }
+          python $main.FullName
 
-      - name: Upload accounts.txt and cookies.txt
+      - name: Upload accounts.txt and cookies.txt (if found)
         uses: actions/upload-artifact@v4
         with:
           name: user-data
           path: |
-            ./something/accounts.txt
-            ./something/cookies.txt
+            **/accounts.txt
+            **/cookies.txt
+          if-no-files-found: warn
