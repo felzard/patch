@@ -1,0 +1,179 @@
+name: JP Menu Rework Test (CI/CD)
+
+on:
+  repository_dispatch:
+    types: [build-jp-menu-apk]
+  workflow_dispatch:
+    inputs:
+      trigger_source:
+        description: 'Manual trigger source (optional)'
+        required: false
+        default: 'manual'
+
+jobs:
+  automate-shit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download apksigner, aapt2, and keys
+        run: |
+          curl -L -o APKEditor.jar https://github.com/felzard/patch/releases/download/1/apkeditor.jar
+          curl -L -o apksigner.jar https://github.com/felzard/patch/releases/download/1/apksigner.jar
+          curl -L -o aapt2.exe https://github.com/felzard/patch/releases/download/1/aapt2.exe
+          curl -L -o testkey.pk8 https://github.com/felzard/patch/releases/download/1/testkey.pk8
+          curl -L -o testkey.x509.pem https://github.com/felzard/patch/releases/download/1/testkey.x509.pem
+          curl -L -o app-debug.zip https://github.com/felzard/patch/releases/download/1/app-debug.zip
+          curl -L -o modmenu.automation.py https://github.com/felzard/patch/releases/download/1/modmenu.automation.py
+          chmod +x aapt2.exe
+
+      - name: Install apkeep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cargo unzip
+          cargo install apkeep
+
+      - name: Download APK/XAPK from APKPure
+        run: |
+          mkdir -p downloads
+          apkeep -a com.sega.pjsekai -d apk-pure downloads
+
+      - name: Install latest apktool (2.10.0)
+        run: |
+          wget https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar -O apktool.jar
+          wget https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool -O apktool
+          chmod +x apktool
+          sudo mv apktool apktool.jar /usr/local/bin/
+
+      - name: Process and Decompile APK/XAPK
+        run: |
+          FILE=$(ls downloads/*.{apk,xapk} 2>/dev/null | head -n1)
+          if [ -z "$FILE" ]; then echo "❌ No .apk or .xapk found"; exit 1; fi
+
+          if [[ "$FILE" == *.xapk ]]; then
+            echo "📦 Detected XAPK, merging directly using APKEditor.jar..."
+            java -jar APKEditor.jar m -i "$FILE" -o merged.apk
+          else
+            echo "📦 Detected APK"
+            cp "$FILE" merged.apk
+          fi
+
+          apktool d merged.apk -o decompiled
+
+      - name: Debug apktool.yml presence and content
+        run: |
+          if [ -f decompiled/apktool.yml ]; then
+            echo "✅ apktool.yml found!"
+            echo "-------- CONTENT --------"
+            cat decompiled/apktool.yml
+            echo "-------------------------"
+          else
+            echo "❌ apktool.yml not found!"
+            exit 1
+          fi
+
+      - name: Extract APK Version
+        id: version
+        run: |
+          VERSION_NAME=$(grep -oP '^  versionName:\s*\K.+' decompiled/apktool.yml)
+          if [ -n "$VERSION_NAME" ]; then
+            echo "apk_version=$VERSION_NAME" >> $GITHUB_OUTPUT
+          else
+            echo "❌ versionName not found in apktool.yml"
+            exit 1
+          fi
+
+      - name: Unzip and integrate modmenu
+        run: |
+          cd decompiled
+
+          echo "📦 Running modmenu automation..."
+          python3 ../modmenu.automation.py > modmenu_output.txt
+
+          echo "📁 Unzipping app-debug.zip..."
+          unzip ../app-debug.zip -d tmp_modmenu
+
+          echo "📂 Locating libil2cpp.so..."
+          LIB_DIR=$(find . -type f -name libil2cpp.so | head -n1 | xargs dirname)
+          if [ -z "$LIB_DIR" ]; then echo "❌ libil2cpp.so not found"; exit 1; fi
+
+          echo "📂 Copying native libs to $LIB_DIR"
+          cp -r tmp_modmenu/lib/arm64-v8a/* "$LIB_DIR/"
+
+          echo "🔍 Finding correct smali folder..."
+          TARGET_SMALI=$(grep -oP '(smali_classes\d+|smali)' modmenu_output.txt | head -n1)
+          if [ -z "$TARGET_SMALI" ]; then echo "❌ Could not determine smali directory"; exit 1; fi
+
+          echo "📂 Copying smali files to $TARGET_SMALI"
+          cp -r tmp_modmenu/smali/* "$TARGET_SMALI/"
+
+      - name: Rebuild unsigned APK
+        run: |
+          echo "🧹 Cleaning leftover .smali.bak files..."
+          find decompiled -type f -name "*.smali.bak" -delete
+          apktool b decompiled -o patched-unsigned.apk
+
+      - name: Align APK
+        run: |
+          sudo apt-get install -y zipalign
+          zipalign -v -p 4 patched-unsigned.apk patched-aligned.apk
+
+      - name: Sign APK with apksigner.jar
+        run: |
+          echo "🔐 Signing APK..."
+          java -jar apksigner.jar sign \
+            --key testkey.pk8 \
+            --cert testkey.x509.pem \
+            --out patched-signed.apk \
+            patched-aligned.apk
+
+      - name: Upload Unsigned APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProjectSekai-Unsigned-APK
+          path: patched-unsigned.apk
+
+      - name: Upload Signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProjectSekai-Signed-APK
+          path: patched-signed.apk
+
+      - name: Notify Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          VERSION=${{ steps.version.outputs.apk_version }}
+          RUN_ID=${{ github.run_id }}
+          REPO=${{ github.repository }}
+
+          SIGNED_URL="https://nightly.link/${REPO}/actions/runs/${RUN_ID}/ProjectSekai-Signed-APK.zip"
+          UNSIGNED_URL="https://nightly.link/${REPO}/actions/runs/${RUN_ID}/ProjectSekai-Unsigned-APK.zip"
+
+          curl -H "Content-Type: application/json" \
+            -X POST \
+            -d '{
+              "embeds": [{
+                "title": "✨ Project Sekai APK Mod Menu (JP) New APKs available!",
+                "fields": [
+                  {
+                    "name": "Version",
+                    "value": "**'"$VERSION"'**",
+                    "inline": true
+                  },
+                  {
+                    "name": "Signed APK",
+                    "value": "[Download Signed APK]('"$SIGNED_URL"')",
+                    "inline": true
+                  },
+                  {
+                    "name": "Unsigned APK",
+                    "value": "[Download Unsigned APK]('"$UNSIGNED_URL"')",
+                    "inline": true
+                  }
+                ]
+              }]
+            }' \
+            $DISCORD_WEBHOOK
