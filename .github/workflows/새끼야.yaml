@@ -89,10 +89,10 @@ jobs:
         run: |
           LIB_PATH=$(find decompiled/ -type f -path "*/libil2cpp.so" | head -n1)
           if [ -z "$LIB_PATH" ]; then echo "❌ libil2cpp.so not found"; exit 1; fi
-          curl -L -o ProjectSekaiReordered.exe https://github.com/felzard/patch/releases/download/1/ProjectSekaiReordered.exe
+          curl -L -o ProjectSekai.exe https://github.com/felzard/patch/releases/download/1/ProjectSekai.exe
           cd "$(dirname "$LIB_PATH")"
-          wine "$OLDPWD/ProjectSekaiReordered.exe" libil2cpp.so
-          rm libil2cpp.so "$OLDPWD/ProjectSekaiReordered.exe"
+          wine "$OLDPWD/ProjectSekai.exe" libil2cpp.so
+          rm libil2cpp.so "$OLDPWD/ProjectSekai.exe"
           mv libil2cpp_patched.so libil2cpp.so
 
       - name: Rebuild unsigned APK
